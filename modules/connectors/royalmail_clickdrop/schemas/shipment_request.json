@@ -1,0 +1,135 @@
+{
+  "items": [
+    {
+      "orderReference": "ORDER-1001",
+      "isRecipientABusiness": false,
+      "recipient": {
+        "address": {
+          "fullName": "John Smith",
+          "companyName": "Example Ltd",
+          "addressLine1": "1 High Street",
+          "addressLine2": "",
+          "addressLine3": "",
+          "city": "London",
+          "county": "",
+          "postcode": "SW1A1AA",
+          "countryCode": "GB"
+        },
+        "phoneNumber": "07123456789",
+        "emailAddress": "john@example.com",
+        "addressBookReference": "ADDR-001"
+      },
+      "sender": {
+        "tradingName": "Example Warehouse",
+        "phoneNumber": "07111111111",
+        "emailAddress": "warehouse@example.com"
+      },
+      "billing": {
+        "address": {
+          "fullName": "Billing Contact",
+          "companyName": "Example Ltd",
+          "addressLine1": "2 Billing Street",
+          "addressLine2": "",
+          "addressLine3": "",
+          "city": "London",
+          "county": "",
+          "postcode": "EC1A1AA",
+          "countryCode": "GB"
+        },
+        "phoneNumber": "07111111111",
+        "emailAddress": "billing@example.com"
+      },
+      "packages": [
+        {
+          "weightInGrams": 500,
+          "packageFormatIdentifier": "smallParcel",
+          "dimensions": {
+            "heightInMms": 50,
+            "widthInMms": 180,
+            "depthInMms": 250
+          },
+          "contents": [
+            {
+              "SKU": "SKU-1",
+              "name": "Blue T-Shirt",
+              "quantity": 2,
+              "unitValue": 12.5,
+              "unitWeightInGrams": 150,
+              "customsDescription": "Blue T-Shirt",
+              "extendedCustomsDescription": "Blue cotton t-shirt",
+              "customsCode": "610910A",
+              "originCountryCode": "GBR",
+              "customsDeclarationCategory": "saleOfGoods",
+              "requiresExportLicence": false,
+              "stockLocation": "A1",
+              "useOriginPreference": true,
+              "supplementaryUnits": "1 unit",
+              "licenseNumber": "",
+              "certificateNumber": ""
+            }
+          ]
+        }
+      ],
+      "orderDate": "2024-01-01T10:00:00Z",
+      "plannedDespatchDate": "2024-01-02T09:00:00Z",
+      "specialInstructions": "Leave at front desk",
+      "subtotal": 25.0,
+      "shippingCostCharged": 3.5,
+      "otherCosts": 0.0,
+      "customsDutyCosts": 0.0,
+      "total": 28.5,
+      "currencyCode": "GBP",
+      "postageDetails": {
+        "sendNotificationsTo": "recipient",
+        "serviceCode": "TPN",
+        "carrierName": "Royal Mail OBA",
+        "serviceRegisterCode": "st",
+        "consequentialLoss": 0,
+        "receiveEmailNotification": true,
+        "receiveSmsNotification": false,
+        "requestSignatureUponDelivery": true,
+        "isLocalCollect": false,
+        "safePlace": "Porch",
+        "department": "Dispatch",
+        "AIRNumber": "",
+        "IOSSNumber": "",
+        "requiresExportLicense": false,
+        "commercialInvoiceNumber": "INV-1001",
+        "commercialInvoiceDate": "2024-01-01T10:00:00Z",
+        "recipientEoriNumber": ""
+      },
+      "tags": [
+        {
+          "key": "channel",
+          "value": "web"
+        }
+      ],
+      "label": {
+        "includeLabelInResponse": true,
+        "includeCN": false,
+        "includeReturnsLabel": false
+      },
+      "orderTax": 0.0,
+      "containsDangerousGoods": false,
+      "dangerousGoodsUnCode": "",
+      "dangerousGoodsDescription": "",
+      "dangerousGoodsQuantity": 0.0,
+      "importer": {
+        "companyName": "Importer Ltd",
+        "addressLine1": "3 Import Road",
+        "addressLine2": "",
+        "addressLine3": "",
+        "city": "Belfast",
+        "postcode": "BT11AA",
+        "country": "United Kingdom",
+        "businessName": "Importer Ltd",
+        "contactName": "Importer Contact",
+        "phoneNumber": "07000000000",
+        "emailAddress": "importer@example.com",
+        "vatNumber": "",
+        "taxCode": "",
+        "eoriNumber": ""
+      }
+    }
+  ]
+}
