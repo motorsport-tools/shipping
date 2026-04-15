@@ -13,6 +13,8 @@ import karrio.providers.royalmail_clickdrop.units as provider_units
 import karrio.schemas.royalmail_clickdrop.shipment_request as royalmail_clickdrop_req
 import karrio.schemas.royalmail_clickdrop.shipment_response as royalmail_clickdrop_res
 
+from karrio.server.core.logging import logger
+
 
 def _attr(obj, name, default=None):
     return getattr(obj, name, default) if obj is not None else default
@@ -165,8 +167,8 @@ def _build_item(item) -> royalmail_clickdrop_req.ContentType:
         unitWeightInGrams=_to_int(_attr(item, "weight"), 0),
         customsDescription=_attr(item, "description") or _attr(item, "title"),
         extendedCustomsDescription=_attr(item, "description"),
-        customsCode=_to_text(_attr(item, "hs_code")),
-        originCountryCode=_to_text(_attr(item, "origin_country")),
+        customsCode="".join(char for char in item.hs_code if char.isalnum()),
+        originCountryCode=item.origin_country,
         customsDeclarationCategory=_to_text(metadata.get("customs_declaration_category")),
         requiresExportLicence=metadata.get("requires_export_licence"),
         stockLocation=_to_text(metadata.get("stock_location")),
@@ -179,7 +181,7 @@ def _build_item(item) -> royalmail_clickdrop_req.ContentType:
 
 def _build_package(
     package,
-    explicit_package_format: typing.Optional[str] = None,
+    explicit_package_format: typing.Optional[str] = None, 
 ) -> royalmail_clickdrop_req.PackageType:
     dimensions = None
     if all([package.length, package.width, package.height]):
@@ -271,6 +273,9 @@ def shipment_request(
     payload: models.ShipmentRequest,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
+
+    logger.info(f'--- Shipment Request ---')
+
     shipper = lib.to_address(payload.shipper)
     recipient = lib.to_address(payload.recipient)
     packages = lib.to_packages(payload.parcels, required=["weight"])
@@ -285,6 +290,9 @@ def shipment_request(
         or payload.service
     )
     service = provider_units.resolve_carrier_service(selected_service)
+
+    logger.info(f'Service: {service}')
+
     if service is None:
         raise ValueError(
             f"Invalid Royal Mail Click & Drop service selector: {selected_service}"
@@ -303,10 +311,114 @@ def shipment_request(
     if total is None:
         total = float(subtotal or 0) + float(shipping_cost or 0) + float(order_tax or 0)
 
-    billing = provider_utils.get_option(options, "billing") or payload.billing_address
 
+    options = lib.to_shipping_options(
+        payload.options,
+        package_options=packages.options,
+        initializer=provider_units.shipping_options_initializer,
+    )
+
+    logger.info(f'Options: {options}')
+    for key, value in vars(options).items():
+        logger.info(f"{key}: {value}")
+
+    logger.info(f'Payload: {payload}')
+
+    currency = options.currency.state or settings.default_currency
+    customs = lib.to_customs_info(payload.customs) if payload.customs else None
+
+    request = royalmail_clickdrop_req.ShipmentRequestType(
+        items=[
+            royalmail_clickdrop_req.ItemType(
+                orderReference=lib.text(payload.reference, max=40),
+                isRecipientABusiness=provider_utils.get_option(options, "is_recipient_a_business"),
+                recipient=royalmail_clickdrop_req.BillingType(
+                    address=royalmail_clickdrop_req.AddressType(
+                        fullName=lib.identity(
+                            recipient.contact or recipient.company_name
+                        ),
+                        companyName=recipient.company_name,
+                        addressLine1=recipient.address_line1,
+                        addressLine2=recipient.address_line2,
+                        city=recipient.city,
+                        county=recipient.state_code,
+                        postcode=recipient.postal_code,
+                        countryCode=recipient.country_code,
+                    ),
+                    phoneNumber=recipient.phone_number,
+                    emailAddress=recipient.email,
+                    addressBookReference=provider_utils.get_option(options, "address_book_reference")
+                ),
+                sender=royalmail_clickdrop_req.SenderType(
+                    tradingName=shipper.company_name,
+                    phoneNumber=shipper.phone_number,
+                    emailAddress=shipper.email,
+                ),
+                packages=[
+                    _build_package(package, explicit_package_format) for package in packages
+                ],
+                orderDate=datetime.datetime.now(datetime.timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                subtotal=lib.identity(
+                    float(customs.invoice_amount or 0) if customs else 0.0
+                ),
+                shippingCostCharged=_to_float(shipping_cost, 0.0),
+                total=lib.identity(
+                    float(customs.invoice_amount or 0) if customs else 0.0
+                ),
+                currencyCode=currency,
+                postageDetails=royalmail_clickdrop_req.PostageDetailsType(
+                    serviceCode=service,
+                    sendNotificationsTo=lib.identity(
+                        "recipient" if recipient.email else None
+                    ),
+                    receiveEmailNotification=lib.identity(
+                        options.royalmail_email_notification.state
+                        if options.royalmail_email_notification.state is not None
+                        else bool(recipient.email)
+                    ),
+                    receiveSmsNotification=lib.identity(
+                        options.royalmail_sms_notification.state
+                        if options.royalmail_sms_notification.state is not None
+                        else bool(recipient.phone_number)
+                    ),
+                    requestSignatureUponDelivery=options.royalmail_signature.state,
+                    isLocalCollect=options.royalmail_local_collect.state,
+                    safePlace=options.royalmail_safe_place.state,
+                    department=options.royalmail_department.state,
+                    AIRNumber=options.royalmail_air_number.state,
+                    IOSSNumber=options.royalmail_ioss_number.state,
+                    requiresExportLicense=options.royalmail_requires_export_license.state,
+                    consequentialLoss=options.royalmail_consequential_loss.state,
+                    recipientEoriNumber=options.royalmail_recipient_eori.state,
+                    carrierName=options.royalmail_carrier_name.state,
+                    commercialInvoiceNumber=lib.identity(
+                        customs.invoice_number if customs else None
+                    ),
+                    commercialInvoiceDate=lib.identity(
+                        customs.invoice_date if customs else None
+                    ),
+                ),
+                label=royalmail_clickdrop_req.LabelType(
+                    includeLabelInResponse=True,
+                    includeCN=options.royalmail_include_cn.state,
+                    includeReturnsLabel=options.royalmail_include_returns_label.state,
+                ),
+                specialInstructions=lib.text(payload.options.get("special_instructions"), max=500),
+            )
+        ]
+    )
+
+    ret = lib.Serializable(request, lib.to_dict)
+
+    logger.info(f'Request: {ret}')
+
+    return ret
+
+    """
     item = royalmail_clickdrop_req.ItemType(
-        orderReference=provider_utils.get_option(options, "order_reference") or payload.reference,
+        orderReference=lib.text(payload.reference, max=40),
         isRecipientABusiness=provider_utils.get_option(options, "is_recipient_a_business"),
         recipient=_build_contact(
             recipient,
@@ -323,7 +435,7 @@ def shipment_request(
         otherCosts=_to_float(provider_utils.get_option(options, "other_costs"), None),
         customsDutyCosts=_to_float(provider_utils.get_option(options, "customs_duty_costs"), None),
         total=_to_float(total, 0.0),
-        currencyCode=provider_utils.get_option(options, "currency_code"),
+        currencyCode=currency,
         postageDetails=royalmail_clickdrop_req.PostageDetailsType(
             sendNotificationsTo=provider_utils.get_option(options, "send_notifications_to"),
             serviceCode=service,
@@ -346,7 +458,7 @@ def shipment_request(
         ),
         tags=_build_tags(provider_utils.get_option(options, "tags", [])),
         label=royalmail_clickdrop_req.LabelType(
-            includeLabelInResponse=provider_utils.get_option(options, "include_label_in_response", True),
+            includeLabelInResponse=options.include_label_in_response.state,
             includeCN=provider_utils.get_option(options, "include_cn"),
             includeReturnsLabel=provider_utils.get_option(options, "include_returns_label"),
         ),
@@ -358,6 +470,10 @@ def shipment_request(
         importer=_build_importer(provider_utils.get_option(options, "importer")),
     )
 
+    logger.info(f'Request item: {item}')
+
     request = royalmail_clickdrop_req.ShipmentRequestType(items=[item])
 
     return lib.Serializable(request, lib.to_dict)
+    """
+ 
