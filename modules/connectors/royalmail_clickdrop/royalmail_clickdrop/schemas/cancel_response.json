@@ -1,0 +1,10 @@
+{
+  "deletedOrders": [
+    {
+      "orderIdentifier": 12345678,
+      "orderReference": "ORDER-1001",
+      "orderInfo": "Deleted successfully"
+    }
+  ],
+  "errors": []
+}

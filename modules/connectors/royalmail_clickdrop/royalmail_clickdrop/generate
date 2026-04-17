@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -e
+
+SCHEMAS=./schemas
+LIB_MODULES=./karrio/schemas/royalmail_clickdrop
+
+mkdir -p "${LIB_MODULES}"
+find "${LIB_MODULES}" -name "*.py" -exec rm -f {} \;
+touch "${LIB_MODULES}/__init__.py"
+
+kcli codegen generate "${SCHEMAS}/error_response.json" "${LIB_MODULES}/error_response.py"
+kcli codegen generate "${SCHEMAS}/manifest_request.json" "${LIB_MODULES}/manifest_request.py"
+kcli codegen generate "${SCHEMAS}/manifest_response.json" "${LIB_MODULES}/manifest_response.py"
+kcli codegen generate "${SCHEMAS}/shipment_request.json" "${LIB_MODULES}/shipment_request.py"
+kcli codegen generate "${SCHEMAS}/shipment_response.json" "${LIB_MODULES}/shipment_response.py"
+kcli codegen generate "${SCHEMAS}/order_status_request.json" "${LIB_MODULES}/order_status_request.py"
+kcli codegen generate "${SCHEMAS}/order_status_response.json" "${LIB_MODULES}/order_status_response.py"
+kcli codegen generate "${SCHEMAS}/return_request.json" "${LIB_MODULES}/return_request.py"
+kcli codegen generate "${SCHEMAS}/return_response.json" "${LIB_MODULES}/return_response.py"
+kcli codegen generate "${SCHEMAS}/return_services_response.json" "${LIB_MODULES}/return_services_response.py"
+kcli codegen generate "${SCHEMAS}/cancel_response.json" "${LIB_MODULES}/cancel_response.py"
+kcli codegen generate "${SCHEMAS}/label_error_response.json" "${LIB_MODULES}/label_error_response.py"
+kcli codegen generate "${SCHEMAS}/manifest_async_response.json" "${LIB_MODULES}/manifest_async_response.py"
+kcli codegen generate "${SCHEMAS}/manifest_details_response.json" "${LIB_MODULES}/manifest_details_response.py"
+kcli codegen generate "${SCHEMAS}/version_response.json" "${LIB_MODULES}/version_response.py"
+kcli codegen generate "${SCHEMAS}/order_info_response.json" "${LIB_MODULES}/order_info_response.py"
+kcli codegen generate "${SCHEMAS}/orders_response.json" "${LIB_MODULES}/orders_response.py"
+kcli codegen generate "${SCHEMAS}/order_details_response.json" "${LIB_MODULES}/order_details_response.py"
+kcli codegen generate "${SCHEMAS}/orders_details_response.json" "${LIB_MODULES}/orders_details_response.py"
+kcli codegen generate "${SCHEMAS}/manifest_error_response.json" "${LIB_MODULES}/manifest_error_response.py"
