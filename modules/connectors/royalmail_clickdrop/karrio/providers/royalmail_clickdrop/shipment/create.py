@@ -352,11 +352,12 @@ def shipment_request(
                 isRecipientABusiness=not recipient.residential,
                 recipient=royalmail_clickdrop_req.BillingType(
                     address=royalmail_clickdrop_req.AddressType(
-                        fullName=recipient.person_name or recipient.company_name,
+                        fullName=lib.identity(
+                            recipient.contact or recipient.company_name
+                        ),
                         companyName=recipient.company_name,
                         addressLine1=recipient.address_line1,
                         addressLine2=recipient.address_line2,
-                        addressLine3=recipient.address_line3,
                         city=recipient.city,
                         county=recipient.state_code,
                         postcode=recipient.postal_code,
@@ -381,7 +382,6 @@ def shipment_request(
                 total=total,
                 currencyCode=currency,
                 postageDetails=royalmail_clickdrop_req.PostageDetailsType(
-                    sendNotificationsTo=options.send_notifications_to.state,
                     serviceCode=service,
                     sendNotificationsTo=lib.identity(
                         "recipient" if recipient.email else None
