@@ -1,5 +1,0 @@
-{
-  "code": "BadRequest",
-  "message": "The request is invalid",
-  "details": "One or more validation errors occurred"
-}
