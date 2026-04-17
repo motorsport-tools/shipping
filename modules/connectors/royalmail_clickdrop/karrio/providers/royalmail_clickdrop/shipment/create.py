@@ -1,16 +1,17 @@
 """Karrio Royal Mail Click and Drop shipment API implementation."""
 
+
 import datetime
 import typing
+from decimal import Decimal
 
-import karrio.core.models as models
 import karrio.lib as lib
+import karrio.core.models as models
 import karrio.providers.royalmail_clickdrop.error as error
-import karrio.providers.royalmail_clickdrop.units as provider_units
 import karrio.providers.royalmail_clickdrop.utils as provider_utils
+import karrio.providers.royalmail_clickdrop.units as provider_units
 import karrio.schemas.royalmail_clickdrop.shipment_request as royalmail_clickdrop_req
 import karrio.schemas.royalmail_clickdrop.shipment_response as royalmail_clickdrop_res
-from decimal import Decimal
 from karrio.core.units import Weight
 
 from karrio.server.core.logging import logger
@@ -23,13 +24,17 @@ def _attr(obj, name, default=None):
 def _get(obj, name, default=None):
     if isinstance(obj, dict):
         return obj.get(name, default)
-
     return getattr(obj, name, default) if obj is not None else default
+
+def _to_text(value, default=None):
+    if value in [None, ""]:
+        return default
+
+    return str(value)
 
 def _to_int(value, default=None):
     if value in [None, ""]:
         return default
-
     try:
         return int(float(value))
     except (TypeError, ValueError):
@@ -39,12 +44,10 @@ def _to_int(value, default=None):
 def _to_float(value, default=None):
     if value in [None, ""]:
         return default
-
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
-
 
 
 def _iso_now() -> str:
@@ -59,6 +62,7 @@ def _iso_now() -> str:
 def _grams(weight) -> int:
     if weight is None:
         raise ValueError("Royal Mail Click & Drop parcel weight is required")
+
     if hasattr(weight, "G"):
         return max(int(round(weight.G)), 1)
 
@@ -85,6 +89,40 @@ def _mm(measurement):
     return _to_int(measurement)
 
 
+def _build_address(address) -> royalmail_clickdrop_req.AddressType:
+    return royalmail_clickdrop_req.AddressType(
+        fullName=_get(address, "person_name") or _get(address, "fullName") or _get(address, "name"),
+        companyName=_get(address, "company_name") or _get(address, "companyName"),
+        addressLine1=_get(address, "address_line1") or _get(address, "addressLine1"),
+        addressLine2=_get(address, "address_line2") or _get(address, "addressLine2"),
+        addressLine3=_get(address, "address_line3") or _get(address, "addressLine3"),
+        city=_get(address, "city"),
+        county=_get(address, "state_code") or _get(address, "state_name") or _get(address, "county"),
+        postcode=_get(address, "postal_code") or _get(address, "postcode"),
+        countryCode=_get(address, "country_code") or _get(address, "countryCode"),
+    )
+
+
+def _build_contact(address, address_book_reference=None) -> royalmail_clickdrop_req.BillingType:
+    return royalmail_clickdrop_req.BillingType(
+        address=_build_address(address) if address is not None else None,
+        phoneNumber=_get(address, "phone_number") or _get(address, "phoneNumber") or _get(address, "phone"),
+        emailAddress=_get(address, "email") or _get(address, "emailAddress"),
+        addressBookReference=address_book_reference,
+    )
+
+
+def _build_sender(address) -> royalmail_clickdrop_req.SenderType:
+    if address is None:
+        return None
+
+    return royalmail_clickdrop_req.SenderType(
+        tradingName=_get(address, "company_name") or _get(address, "person_name") or _get(address, "tradingName"),
+        phoneNumber=_get(address, "phone_number") or _get(address, "phoneNumber") or _get(address, "phone"),
+        emailAddress=_get(address, "email") or _get(address, "emailAddress"),
+    )
+
+
 def _build_importer(importer, options) -> royalmail_clickdrop_req.ImporterType:
     if importer is None:
         return None
@@ -107,6 +145,15 @@ def _build_importer(importer, options) -> royalmail_clickdrop_req.ImporterType:
     )
 
 
+def _build_tags(tags) -> typing.List[royalmail_clickdrop_req.TagType]:
+    return [
+        royalmail_clickdrop_req.TagType(
+            key=_get(tag, "key"),
+            value=_get(tag, "value"),
+        )
+        for tag in (tags or [])
+    ]
+
 def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
     metadata = _attr(item, "metadata", {}) or {}
     if not isinstance(metadata, dict):
@@ -125,7 +172,10 @@ def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
         extendedCustomsDescription=lib.text(_attr(item, "description"), max=300),
         customsCode=lib.text("".join(char for char in item.hs_code if char.isalnum()), max=10),
         originCountryCode=item.origin_country,
-        customsDeclarationCategory=provider_units.resolve_customs_category(customs.content_type),
+        customsDeclarationCategory=(
+            provider_units.resolve_customs_category(customs.content_type) 
+            if customs is not None else "saleOfGoods"
+        ),
         requiresExportLicence=metadata.get("requires_export_licence"),
         stockLocation=lib.text(metadata.get("stock_location"), max=50),
         useOriginPreference=metadata.get("use_origin_preference"),
@@ -164,12 +214,11 @@ def _sum_items_value(packages) -> float:
 
     for package in packages or []:
         for item in (package.items or []):
-            quantity = Decimal(str(_attr(item, "quantity", 1) or 1))
+            qty = Decimal(str(_attr(item, "quantity", 1) or 1))
             value = Decimal(str(_attr(item, "value_amount") or _attr(item, "value") or 0))
-            total += quantity * value
+            total += qty * value
 
     return float(total)
-
 
 
 def parse_shipment_response(
@@ -248,7 +297,6 @@ def _extract_details(
         ),
     )
 
-
 def _extract_label_messages(
     data: dict,
     settings: provider_utils.Settings,
@@ -287,7 +335,6 @@ def _extract_label_messages(
 
     return messages
 
-
 def shipment_request(
     payload: models.ShipmentRequest,
     settings: provider_utils.Settings,
@@ -300,7 +347,7 @@ def shipment_request(
     packages = lib.to_packages(payload.parcels, required=["weight"])
 
     options = lib.to_shipping_options(
-        payload.options or {},
+        payload.options,
         package_options=packages.options,
         initializer=provider_units.shipping_options_initializer,
     )
@@ -336,11 +383,15 @@ def shipment_request(
     if total is None:
         total = float(subtotal or 0) + float(shipping_cost or 0) + float(order_tax or 0) + float(customs_duty or 0)
 
+
     options = lib.to_shipping_options(
         payload.options,
         package_options=packages.options,
         initializer=provider_units.shipping_options_initializer,
     )
+
+    for key, value in vars(options).items():
+        logger.info(f"{key}: {value}")
 
     currency = options.currency.state or settings.default_currency
     customs = lib.to_customs_info(payload.customs) if payload.customs else None
@@ -378,7 +429,7 @@ def shipment_request(
                 orderDate=(lib.to_date(options.rm_order_date.state) or _iso_now()).isoformat(),
                 subtotal=subtotal or 0.0,
                 shippingCostCharged=_to_float(shipping_cost, 0.0),
-                customsDutyCosts=_to_float(customs_duty) if customs.incoterm == 'DDP' else None,
+                customsDutyCosts=_to_float(customs_duty) if customs and customs.incoterm == 'DDP' else None,
                 total=total,
                 currencyCode=currency,
                 postageDetails=royalmail_clickdrop_req.PostageDetailsType(
