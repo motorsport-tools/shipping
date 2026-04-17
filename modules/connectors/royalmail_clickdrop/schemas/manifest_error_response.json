@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "code": "Forbidden",
+      "description": "Feature not available"
+    },
+    {
+      "code": "BadRequest",
+      "description": "No eligible orders found"
+    }
+  ]
+}

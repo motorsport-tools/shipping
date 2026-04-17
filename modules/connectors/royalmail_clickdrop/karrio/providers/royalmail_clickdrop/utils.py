@@ -56,6 +56,9 @@ class Settings(core.Settings):
             "Accept": "application/pdf, application/json",
         }
 
+    @property
+    def label_type(self) -> str:
+        return self.connection_config.label_type.state or "PDF"
 
 def _format_order_identifier(value: typing.Any) -> str:
     """

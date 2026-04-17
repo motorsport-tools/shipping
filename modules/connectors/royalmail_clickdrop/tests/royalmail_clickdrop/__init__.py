@@ -1,1 +1,1 @@
-from .fixture import gateway
+# royalmail_clickdrop tests

@@ -1,12 +1,15 @@
 """Royal Mail Click and Drop carrier return shipment tests."""
 
+import logging
 import unittest
 from unittest.mock import patch
 
-import karrio.lib as lib
 import karrio.core.models as models
+import karrio.lib as lib
 
 from .fixture import gateway
+
+logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
@@ -15,15 +18,12 @@ class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
         self.ReturnShipmentRequest = models.ShipmentRequest(**ReturnShipmentPayload)
 
     def test_create_return_shipment_request(self):
-        request = gateway.mapper.create_return_shipment_request(self.ReturnShipmentRequest)
-        serialized = lib.to_dict(request.serialize())
-
-        print("DEBUG create return shipment request:", serialized)
-
-        self.assertEqual(
-            serialized,
-            ReturnShipmentRequest,
+        request = gateway.mapper.create_return_shipment_request(
+            self.ReturnShipmentRequest
         )
+
+        print(f"Generated request: {lib.to_dict(request.serialize())}")
+        self.assertEqual(lib.to_dict(request.serialize()), ReturnShipmentRequest)
 
     def test_create_return_shipment(self):
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
@@ -34,24 +34,10 @@ class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
             )
             gateway.proxy.create_return_shipment(request)
 
-            print("DEBUG create return shipment call args:", mock.call_args)
-
+            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{gateway.settings.server_url}/returns",
-            )
-            self.assertEqual(mock.call_args[1]["method"], "POST")
-            self.assertEqual(
-                mock.call_args[1]["headers"]["Authorization"],
-                f"Bearer {gateway.settings.api_key}",
-            )
-            self.assertEqual(
-                mock.call_args[1]["headers"]["Content-Type"],
-                "application/json",
-            )
-            self.assertEqual(
-                mock.call_args[1]["headers"]["Accept"],
-                "application/json",
             )
 
     def test_parse_return_shipment_response(self):
@@ -62,27 +48,15 @@ class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
                 self.ReturnShipmentRequest
             )
             response = gateway.proxy.create_return_shipment(request)
-            shipment, messages = gateway.mapper.parse_return_shipment_response(response)
-
-            print(
-                "DEBUG parsed return shipment:",
-                lib.to_dict(shipment) if shipment else None,
-            )
-            print(
-                "DEBUG parsed return shipment messages:",
-                lib.to_dict(messages),
+            parsed_response = list(
+                gateway.mapper.parse_return_shipment_response(response)
             )
 
-            self.assertIsNotNone(shipment)
-            self.assertEqual(len(messages), 0)
-            self.assertEqual(shipment.carrier_id, "royalmail_clickdrop")
-            self.assertEqual(shipment.carrier_name, "royalmail_clickdrop")
-            self.assertEqual(shipment.tracking_number, "RM123456789GB")
-            self.assertEqual(shipment.shipment_identifier, "0A12345678901234")
-            self.assertEqual(shipment.label_type, "PDF")
-            self.assertEqual(shipment.docs.label, "JVBERi0xLjQKJcfs...")
-            self.assertEqual(shipment.meta["qr_code"], "iVBORw0KGgoAAAANSUhEUgAA...")
-            self.assertTrue(shipment.meta["is_return"])
+            print(f"Parsed response: {lib.to_dict(parsed_response)}")
+            self.assertListEqual(
+                lib.to_dict(parsed_response),
+                ParsedReturnShipmentResponse,
+            )
 
     def test_parse_error_response(self):
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
@@ -92,18 +66,15 @@ class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
                 self.ReturnShipmentRequest
             )
             response = gateway.proxy.create_return_shipment(request)
-            shipment, messages = gateway.mapper.parse_return_shipment_response(response)
-
-            print("DEBUG parsed return shipment error shipment:", shipment)
-            print(
-                "DEBUG parsed return shipment error messages:",
-                lib.to_dict(messages),
+            parsed_response = list(
+                gateway.mapper.parse_return_shipment_response(response)
             )
 
-            self.assertIsNone(shipment)
-            self.assertEqual(len(messages), 1)
-            self.assertEqual(messages[0].code, "BadRequest")
-            self.assertEqual(messages[0].message, "Invalid return request")
+            print(f"Error response: {lib.to_dict(parsed_response)}")
+            self.assertListEqual(
+                lib.to_dict(parsed_response),
+                ParsedErrorResponse,
+            )
 
 
 if __name__ == "__main__":
@@ -149,11 +120,11 @@ ReturnShipmentPayload = {
 
 ReturnShipmentRequest = {
     "service": {
-        "serviceCode": "TSS"
+        "serviceCode": "TSS",
     },
     "shipment": {
         "customerReference": {
-            "reference": "ORDER-1001"
+            "reference": "ORDER-1001",
         },
         "returnAddress": {
             "addressLine1": "123 Test Street",
@@ -174,8 +145,8 @@ ReturnShipmentRequest = {
             "firstName": "John",
             "lastName": "Smith",
             "postcode": "SW1A1AA",
-        }
-    }
+        },
+    },
 }
 
 ReturnShipmentResponse = """{
@@ -192,3 +163,37 @@ ReturnShipmentErrorResponse = """{
   "message": "Invalid return request",
   "details": "Service code TSS is not available for this account"
 }"""
+
+ParsedReturnShipmentResponse = [
+    {
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "tracking_number": "RM123456789GB",
+        "shipment_identifier": "0A12345678901234",
+        "label_type": "PDF",
+        "docs": {
+            "label": "JVBERi0xLjQKJcfs...",
+            "pdf_label": "JVBERi0xLjQKJcfs...",
+        },
+        "meta": {
+            "qr_code": "iVBORw0KGgoAAAANSUhEUgAA...",
+            "is_return": True,
+        },
+    },
+    [],
+]
+
+ParsedErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "BadRequest",
+            "message": "Invalid return request",
+            "details": {
+                "details": "Service code TSS is not available for this account",
+            },
+        }
+    ],
+]

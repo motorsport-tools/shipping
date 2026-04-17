@@ -20,6 +20,14 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
         or _get(payload, "reference")
     )
 
+    resolved_order_identifiers = provider_utils.make_order_identifiers(order_identifiers)
+
+    if not resolved_order_identifiers:
+        raise ValueError(
+            "Royal Mail Click & Drop label requests require "
+            "`order_identifiers`, `shipment_identifier`, or `reference`"
+        )
+
     document_type = _get(payload, "document_type", "postageLabel")
     include_returns_label = _get(payload, "include_returns_label")
     include_cn = _get(payload, "include_cn")
@@ -28,7 +36,7 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
         include_returns_label = False
 
     request = {
-        "orderIdentifiers": provider_utils.make_order_identifiers(order_identifiers),
+        "orderIdentifiers": resolved_order_identifiers,
         "query": {
             "documentType": document_type,
             "includeReturnsLabel": include_returns_label if document_type == "postageLabel" else None,
@@ -38,7 +46,6 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
 
     return lib.Serializable(request, lambda data: data)
 
-
 def parse_label_response(
     _response: lib.Deserializable[typing.Any],
     settings: provider_utils.Settings,
@@ -46,8 +53,27 @@ def parse_label_response(
     response = _response.deserialize()
 
     if isinstance(response, (bytes, bytearray)):
-        encoded = provider_utils.encode_document(bytes(response))
-        return models.Documents(label=encoded, pdf_label=encoded), []
+        raw = bytes(response)
+        normalized = raw.lstrip()
+
+        # Successful label response
+        if normalized.startswith(b"%PDF-"):
+            encoded = provider_utils.encode_document(raw)
+            return models.Documents(label=encoded, pdf_label=encoded), []
+
+        # Some carrier errors can come back as JSON bytes even when the proxy uses binary trace
+        try:
+            response = lib.to_dict(raw.decode("utf-8-sig"))
+        except (UnicodeDecodeError, TypeError, ValueError):
+            return None, [
+                models.Message(
+                    carrier_id=settings.carrier_id,
+                    carrier_name=settings.carrier_name,
+                    code="label_error",
+                    message="Unable to parse label response",
+                    details={"operation": "get_label"},
+                )
+            ]
 
     if isinstance(response, str):
         try:
@@ -59,9 +85,14 @@ def parse_label_response(
                     carrier_name=settings.carrier_name,
                     code="label_error",
                     message="Unable to parse label response",
-                    details={},
+                    details={"operation": "get_label"},
                 )
             ]
 
-    messages = error.parse_error_response(response, settings)
+    messages = error.parse_error_response(
+        response,
+        settings,
+        context="label",
+        operation="get_label",
+    )
     return None, messages

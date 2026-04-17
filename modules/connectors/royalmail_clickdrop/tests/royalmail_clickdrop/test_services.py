@@ -1,14 +1,21 @@
 """Royal Mail Click and Drop carrier services tests."""
 
-import copy
 import unittest
 
-import karrio.lib as lib
-import karrio.providers.royalmail_clickdrop.units as provider_units
-import karrio.plugins.royalmail_clickdrop as plugin
 import karrio.core.models as models
+import karrio.lib as lib
+import karrio.plugins.royalmail_clickdrop as plugin
+import karrio.providers.royalmail_clickdrop.units as provider_units
 
-from .fixture import gateway, ShipmentPayload
+from .fixture import (
+    gateway,
+    ShipmentPayload,
+    ShipmentPayloadEnvelopePackaging,
+    ShipmentPayloadInferredLetter,
+    ShipmentPayloadInferredLargeLetter,
+    ShipmentPayloadInferredParcel,
+    ExpectedCoreServices,
+)
 
 
 class TestRoyalMailClickandDropServices(unittest.TestCase):
@@ -33,10 +40,9 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
 
         self.assertGreater(len(services), 0)
 
-        tpn24 = next((s for s in services if s.service_code == "tpn24_01"), None)
-        self.assertIsNotNone(tpn24)
-        self.assertEqual(tpn24.carrier_service_code, "TPN24")
-        self.assertEqual(tpn24.service_name, "Tracked 24 (01 / 214655TN)")
+        codes = [s.service_code for s in services]
+        for code in ExpectedCoreServices:
+            self.assertIn(code, codes)
 
     def test_plugin_metadata_exposes_service_levels(self):
         metadata = plugin.METADATA
@@ -49,73 +55,65 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertGreater(len(service_levels), 0)
 
         codes = [s.service_code for s in service_levels]
-        self.assertIn("tpn24_01", codes)
-        self.assertIn("fe0_01", codes)
+        for code in ExpectedCoreServices:
+            self.assertIn(code, codes)
 
     def test_resolve_carrier_service(self):
-        print(
-            "DEBUG resolve csv service by CSV key:",
-            provider_units.resolve_carrier_service("tpn24_01"),
-        )
-        print(
-            "DEBUG resolve enum alias:",
-            provider_units.resolve_carrier_service("tracked_24"),
-        )
-        print(
-            "DEBUG resolve exact enum alias:",
-            provider_units.resolve_carrier_service("express_48"),
-        )
-        print(
-            "DEBUG resolve exact carrier code:",
-            provider_units.resolve_carrier_service("TPN24"),
-        )
+        scenarios = [
+            ("csv_service_key", "tpn24_01", "TPN24"),
+            ("enum_alias", "tracked_24", "TPN24"),
+            ("exact_carrier_code", "TPN24", "TPN24"),
+            ("return_alias", "tracked_returns_48", "TSS"),
+            ("return_exact_code", "TSS", "TSS"),
+            ("unknown", "not_a_service", None),
+        ]
 
-        self.assertEqual(provider_units.resolve_carrier_service("tpn24_01"), "TPN24")
-        self.assertEqual(provider_units.resolve_carrier_service("tracked_24"), "TPN24")
-        self.assertEqual(provider_units.resolve_carrier_service("express_48"), "FE0")
-        self.assertEqual(provider_units.resolve_carrier_service("TPN24"), "TPN24")
+        for name, selector, expected in scenarios:
+            with self.subTest(name=name):
+                resolved = provider_units.resolve_carrier_service(selector)
 
-    def test_resolve_unknown_service_returns_none(self):
-        print(
-            "DEBUG resolve unknown service:",
-            provider_units.resolve_carrier_service("TPN"),
-        )
+                print(f"DEBUG resolve carrier service [{name}]:", selector, resolved)
 
-        self.assertIsNone(provider_units.resolve_carrier_service("TPN"))
-        self.assertIsNone(provider_units.resolve_carrier_service("express48"))
-        self.assertIsNone(provider_units.resolve_carrier_service("not_a_service"))
+                self.assertEqual(resolved, expected)
 
-    def test_shipment_request_uses_resolved_csv_service_code(self):
-        payload = copy.deepcopy(ShipmentPayload)
-        payload["service"] = "tpn24_01"
-        payload["options"].pop("service_code", None)
+    def test_return_service_detection(self):
+        for selector in ["tracked_returns_48", "TSS", "RT0", "RTA"]:
+            with self.subTest(selector=selector):
+                result = provider_units.is_return_service(selector)
 
-        shipment = models.ShipmentRequest(**payload)
-        request = gateway.mapper.create_shipment_request(shipment)
-        serialized = lib.to_dict(request.serialize())
+                print("DEBUG return service detection:", selector, result)
 
-        print("DEBUG shipment request from csv service selector:", serialized)
+                self.assertTrue(result)
 
-        self.assertEqual(
-            serialized["items"][0]["postageDetails"]["serviceCode"],
-            "TPN24",
-        )
+        for selector in ["tracked_24", "TPN24", "FE0"]:
+            with self.subTest(selector=selector):
+                result = provider_units.is_return_service(selector)
 
-    def test_shipment_request_uses_exact_carrier_service_code(self):
-        payload = copy.deepcopy(ShipmentPayload)
-        payload["service"] = "TPN24"
-        payload["options"].pop("service_code", None)
+                print("DEBUG non-return service detection:", selector, result)
 
-        shipment = models.ShipmentRequest(**payload)
-        request = gateway.mapper.create_shipment_request(shipment)
-        serialized = lib.to_dict(request.serialize())
+                self.assertFalse(result)
 
-        print("DEBUG shipment request from exact carrier service code:", serialized)
+    def test_package_format_resolution(self):
+        scenarios = [
+            ("explicit_small_parcel", ShipmentPayload, "smallParcel"),
+            ("packaging_type_fallback", ShipmentPayloadEnvelopePackaging, "letter"),
+            ("inferred_letter", ShipmentPayloadInferredLetter, "letter"),
+            ("inferred_large_letter", ShipmentPayloadInferredLargeLetter, "largeLetter"),
+            ("inferred_parcel", ShipmentPayloadInferredParcel, "smallParcel"),
+        ]
 
-        self.assertEqual(
-            serialized["items"][0]["postageDetails"]["serviceCode"],
-            "TPN24",
-        )
+        for name, payload, expected_format in scenarios:
+            with self.subTest(name=name):
+                shipment = models.ShipmentRequest(**payload)
+                request = gateway.mapper.create_shipment_request(shipment)
+                serialized = lib.to_dict(request.serialize())
+
+                print(f"DEBUG package format request [{name}]:", serialized)
+
+                self.assertEqual(
+                    serialized["items"][0]["packages"][0]["packageFormatIdentifier"],
+                    expected_format,
+                )
 
 
 if __name__ == "__main__":

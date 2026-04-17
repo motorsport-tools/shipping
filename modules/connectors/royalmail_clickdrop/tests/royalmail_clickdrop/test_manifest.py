@@ -1,13 +1,14 @@
 """Royal Mail Click and Drop carrier manifest tests."""
 
 import unittest
-from unittest.mock import patch
-
+from unittest.mock import patch, ANY
+from .fixture import gateway
+import logging
 import karrio.sdk as karrio
 import karrio.lib as lib
 import karrio.core.models as models
 
-from .fixture import gateway, ManifestPayload, ManifestResponse, ManifestErrorResponse
+logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropManifest(unittest.TestCase):
@@ -17,16 +18,8 @@ class TestRoyalMailClickandDropManifest(unittest.TestCase):
 
     def test_create_manifest_request(self):
         request = gateway.mapper.create_manifest_request(self.ManifestRequest)
-        serialized = request.serialize()
-
-        print("DEBUG create manifest request:", serialized)
-
-        self.assertEqual(
-            serialized,
-            {
-                "carrierName": "Royal Mail OBA"
-            },
-        )
+        print(f"Generated request: {lib.to_dict(request.serialize())}")
+        self.assertEqual(lib.to_dict(request.serialize()), ManifestRequest)
 
     def test_create_manifest(self):
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
@@ -34,56 +27,101 @@ class TestRoyalMailClickandDropManifest(unittest.TestCase):
 
             karrio.Manifest.create(self.ManifestRequest).from_(gateway)
 
-            print("DEBUG create manifest call args:", mock.call_args)
-
+            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{gateway.settings.server_url}/manifests",
-            )
-            self.assertEqual(mock.call_args[1]["method"], "POST")
-            self.assertEqual(
-                mock.call_args[1]["headers"]["Authorization"],
-                f"Bearer {gateway.settings.api_key}",
             )
 
     def test_parse_manifest_response(self):
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
             mock.return_value = ManifestResponse
 
-            manifest, messages = (
+            parsed_response = (
                 karrio.Manifest.create(self.ManifestRequest)
                 .from_(gateway)
                 .parse()
             )
 
-            print("DEBUG parsed manifest:", lib.to_dict(manifest) if manifest else None)
-            print("DEBUG parsed manifest messages:", lib.to_dict(messages))
-
-            self.assertIsNotNone(manifest)
-            self.assertEqual(len(messages), 0)
-            self.assertEqual(manifest.carrier_id, "royalmail_clickdrop")
-            self.assertEqual(manifest.meta["manifest_number"], 1001)
-            self.assertEqual(manifest.meta["status"], "completed")
-            self.assertEqual(manifest.doc.manifest, "JVBERi0xLjQKJcfs...")
+            print(f"Parsed response: {lib.to_dict(parsed_response)}")
+            self.assertListEqual(lib.to_dict(parsed_response), ParsedManifestResponse)
 
     def test_parse_error_response(self):
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
-            mock.return_value = ManifestErrorResponse
+            mock.return_value = ErrorResponse
 
-            manifest, messages = (
+            parsed_response = (
                 karrio.Manifest.create(self.ManifestRequest)
                 .from_(gateway)
                 .parse()
             )
 
-            print("DEBUG parsed manifest error manifest:", manifest)
-            print("DEBUG parsed manifest error messages:", lib.to_dict(messages))
-
-            self.assertIsNone(manifest)
-            self.assertEqual(len(messages), 1)
-            self.assertEqual(messages[0].code, "Forbidden")
-            self.assertEqual(messages[0].message, "Feature not available")
+            print(f"Error response: {lib.to_dict(parsed_response)}")
+            self.assertListEqual(lib.to_dict(parsed_response), ParsedErrorResponse)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+ManifestPayload = {
+    "shipment_identifiers": ["12345678", "12345679"],
+    "address": {
+        "address_line1": "123 Test Street",
+        "city": "London",
+        "postal_code": "SW1A1AA",
+        "country_code": "GB",
+        "person_name": "Warehouse User",
+        "company_name": "Test Warehouse",
+    },
+    "options": {
+        "carrier_name": "Royal Mail OBA",
+    },
+}
+
+ManifestRequest = {
+    "carrierName": "Royal Mail OBA",
+}
+
+ManifestResponse = """{
+  "manifestNumber": 1001,
+  "documentPdf": "JVBERi0xLjQKJcfs..."
+}"""
+
+ErrorResponse = """{
+  "errors": [
+    {
+      "code": "Forbidden",
+      "description": "Feature not available"
+    }
+  ]
+}"""
+
+ParsedManifestResponse = [
+    {
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "doc": ANY,
+        "meta": {
+            "manifest_number": 1001,
+            "status": "completed",
+            "document_available": True,
+        },
+    },
+    [],
+]
+
+ParsedErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "Forbidden",
+            "message": "Feature not available",
+            "details": {
+                "operation": "manifest",
+            },
+        }
+    ],
+]

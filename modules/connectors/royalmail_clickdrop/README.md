@@ -1,18 +1,22 @@
 # karrio.royalmail_clickdrop
 
-This package is a Royal Mail Click and Drop extension of the [karrio](https://pypi.org/project/karrio) using the multi carrier shipping SDK.
+This package is a Royal Mail Click and Drop extension of the [karrio](https://pypi.org/project/karrio) multi carrier shipping SDK.
 
 ## Requirements
 
 `Python 3.11+`
 
+
+## Dependancies
+
+`pycountry`
+
+this is used to convert country ISOs
+
 ## Installation
 
 ```bash
-local dev
-python -m pip -e install modules/connectors/royalmail_clickdrop
-
-pip install karrio.royalmail_clickdrop
+pip install -e karrio.royalmail_clickdrop
 ```
 
 ## Usage
@@ -30,4 +34,4 @@ royalmail_clickdrop = karrio.gateway["royalmail_clickdrop"].create(
 )
 ```
 
-Check the [Karrio Mutli-carrier SDK docs](https://docs.karrio.io) for the guide
+Check the [Karrio Mutli-carrier SDK docs](https://docs.karrio.io) for Shipping API requests

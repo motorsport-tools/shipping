@@ -1,6 +1,8 @@
 import csv
 import pathlib
 import typing
+from decimal import Decimal, ROUND_HALF_UP
+
 import karrio.lib as lib
 import karrio.core.units as units
 import karrio.core.models as models
@@ -15,7 +17,6 @@ class ConnectionConfig(lib.Enum):
     shipping_services = lib.OptionEnum("shipping_services", list)
     label_type = lib.OptionEnum("label_type", str, "PDF")
 
-# Reserved for future explicit unit validation / metadata exposure. (code not done yet)
 
 class WeightUnit(lib.Enum):
     G = "G"
@@ -28,6 +29,94 @@ class DimensionUnit(lib.Enum):
     CM = "CM"
     IN = "IN"
 
+
+_WEIGHT_FACTORS = {
+    "G": Decimal("1"),
+    "KG": Decimal("1000"),
+    "LB": Decimal("453.59237"),
+    "OZ": Decimal("28.349523125"),
+}
+
+_DIMENSION_FACTORS = {
+    "MM": Decimal("1"),
+    "CM": Decimal("10"),
+    "IN": Decimal("25.4"),
+    "M": Decimal("1000"),
+    "FT": Decimal("304.8"),
+}
+
+
+def _decimal(value) -> typing.Optional[Decimal]:
+    if value in [None, ""]:
+        return None
+
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _unit_code(unit) -> typing.Optional[str]:
+    if unit is None:
+        return None
+
+    value = getattr(unit, "value", unit)
+    return str(value).upper() if value is not None else None
+
+
+def _round_decimal(value: Decimal) -> int:
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def weight_to_grams(value, unit=None, default=None) -> typing.Optional[int]:
+    amount = _decimal(value)
+    code = _unit_code(unit)
+
+    if amount is None:
+        return default
+
+    factor = _WEIGHT_FACTORS.get(code, Decimal("1")) if code is not None else Decimal("1")
+    return _round_decimal(amount * factor)
+
+
+def weight_in_grams(weight, default=None) -> typing.Optional[int]:
+    if weight is None:
+        return default
+
+    native = weight_to_grams(
+        getattr(weight, "value", None),
+        getattr(weight, "unit", None),
+    )
+    if native is not None:
+        return native
+
+    if hasattr(weight, "G"):
+        grams = _decimal(weight.G)
+        if grams is not None:
+            return _round_decimal(grams)
+
+    return weight_to_grams(weight, default=default)
+
+
+def dimension_in_mms(measurement, default=None) -> typing.Optional[int]:
+    if measurement is None:
+        return default
+
+    value = _decimal(getattr(measurement, "value", None))
+    unit = _unit_code(getattr(measurement, "unit", None))
+
+    # Prefer native value + unit to avoid float drift from computed properties.
+    if value is not None:
+        factor = _DIMENSION_FACTORS.get(unit, Decimal("1"))
+        return _round_decimal(value * factor)
+
+    if hasattr(measurement, "MM"):
+        mms = _decimal(measurement.MM)
+        if mms is not None:
+            return _round_decimal(mms)
+
+    raw = _decimal(measurement)
+    return _round_decimal(raw) if raw is not None else default
 
 class PackagingType(lib.StrEnum):
     """
@@ -256,7 +345,7 @@ def load_services_from_csv() -> list:
     services_dict: dict[str, dict] = {}
 
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
-        reader = csv.DictReader(csvfile)
+        reader = csv.DictReader((row for row in csvfile if row.strip()))
         for row in reader:
             service_code = row["service_code"]
             zone_label = row.get("zone_label", "")
@@ -366,6 +455,7 @@ def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[st
 
     # 4. strict mode: unknown services are invalid
     return None
+
 def is_return_service(service: typing.Optional[str]) -> bool:
     resolved = resolve_carrier_service(service)
     return resolved in RETURN_SERVICE_CODES if resolved else False
@@ -402,6 +492,20 @@ def _mms(measurement) -> typing.Optional[int]:
     except Exception:
         return None
 
+def build_dimensions(package, dimension_type):
+    height_in_mms = dimension_in_mms(package.height)
+    width_in_mms = dimension_in_mms(package.width)
+    depth_in_mms = dimension_in_mms(package.length)
+
+    if not all(value is not None for value in [height_in_mms, width_in_mms, depth_in_mms]):
+        return None
+
+    return dimension_type(
+        heightInMms=height_in_mms,
+        widthInMms=width_in_mms,
+        depthInMms=depth_in_mms,
+    )
+
 
 def resolve_package_format(
     package=None,
@@ -428,11 +532,11 @@ def resolve_package_format(
         if mapped is not None:
             return mapped
 
-    weight_g = _grams(getattr(package, "weight", None)) if package is not None else None
+    weight_g = weight_in_grams(getattr(package, "weight", None)) if package is not None else None
     dims = [
-        _mms(getattr(package, "length", None)) if package is not None else None,
-        _mms(getattr(package, "width", None)) if package is not None else None,
-        _mms(getattr(package, "height", None)) if package is not None else None,
+        dimension_in_mms(getattr(package, "length", None)) if package is not None else None,
+        dimension_in_mms(getattr(package, "width", None)) if package is not None else None,
+        dimension_in_mms(getattr(package, "height", None)) if package is not None else None,
     ]
     dims = [d for d in dims if d is not None]
 
