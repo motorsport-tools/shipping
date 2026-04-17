@@ -7,15 +7,17 @@ import karrio.lib as lib
 import karrio.core.units as units
 import karrio.core.models as models
 
+class LabelType(lib.Enum):
+    PDF = "PDF"
+
 
 class ConnectionConfig(lib.Enum):
     """Carrier connection configuration options."""
+    include_label_in_response = lib.OptionEnum("include_label_in_response", bool, True, True)
+    include_return_label_in_response = lib.OptionEnum("include_return_label_in_response", bool, False, False)
 
-    base_url = lib.OptionEnum("base_url", str)
-    carrier_name = lib.OptionEnum("carrier_name", str)
     shipping_options = lib.OptionEnum("shipping_options", list)
     shipping_services = lib.OptionEnum("shipping_services", list)
-    label_type = lib.OptionEnum("label_type", str, "PDF")
 
 
 class WeightUnit(lib.Enum):
@@ -200,6 +202,8 @@ class ShippingService(lib.StrEnum):
     - Duplicate posting-location variants belong in services.csv, not here.
     """
 
+    mp7_01 = "MP7"
+
     # Domestic outbound
     first_class = "BPL1"
     second_class = "BPL2"
@@ -267,58 +271,37 @@ class ShippingService(lib.StrEnum):
     express48_returns = "RTA"
     tracked_returns_48 = "TSS"
 
-
 class ShippingOption(lib.Enum):
     """Royal Mail Click & Drop carrier options."""
+    rm_order_date = lib.OptionEnum("orderDate")
+    rm_shipping_cost_charged = lib.OptionEnum("shippingCharge")
+    rm_customs_duty_costs = lib.OptionEnum("customsDutyCosts")
+    rm_total = lib.OptionEnum("orderTotal")
 
-    service_code = lib.OptionEnum("service_code")
-    package_format_identifier = lib.OptionEnum("package_format_identifier")
-    service_register_code = lib.OptionEnum("service_register_code")
+    rm_email_notification = lib.OptionEnum("receiveEmailNotification", bool)
+    rm_sms_notification = lib.OptionEnum("receiveSmsNotification", bool)
+    rm_request_signature_upon_delivery = lib.OptionEnum("requestSignatureUponDelivery", bool)
+    rm_is_local_collect = lib.OptionEnum("isLocalCollect", bool)
+    rm_safe_place = lib.OptionEnum("safePlace")
+    rm_department = lib.OptionEnum("department")
+    rm_airnumber = lib.OptionEnum("AIRNumber")
+    rm_iossnumber = lib.OptionEnum("IOSSNumber")
+    rm_requires_export_license = lib.OptionEnum("requiresExportLicense", bool)
+    rm_recipient_eori = lib.OptionEnum("recipientEoriNumber")
 
-    order_reference = lib.OptionEnum("order_reference")
-    order_date = lib.OptionEnum("order_date")
-    planned_despatch_date = lib.OptionEnum("planned_despatch_date")
-    subtotal = lib.OptionEnum("subtotal", float)
-    shipping_cost_charged = lib.OptionEnum("shipping_cost_charged", float)
-    other_costs = lib.OptionEnum("other_costs", float)
-    customs_duty_costs = lib.OptionEnum("customs_duty_costs", float)
-    total = lib.OptionEnum("total", float)
-    currency_code = lib.OptionEnum("currency_code")
-    special_instructions = lib.OptionEnum("special_instructions")
-    order_tax = lib.OptionEnum("order_tax", float)
+    rm_contains_dangerous_goods = lib.OptionEnum("containsDangerousGoods")
+    rm_dangerous_goods_un_code = lib.OptionEnum("dangerousGoodsUnCode")
+    rm_dangerous_goods_description = lib.OptionEnum("dangerousGoodsDescription")
+    rm_dangerous_goods_quantity = lib.OptionEnum("dangerousGoodsQuantity", int)
 
-    include_label_in_response = lib.OptionEnum("include_label_in_response", bool)
-    include_cn = lib.OptionEnum("include_cn", bool)
-    include_returns_label = lib.OptionEnum("include_returns_label", bool)
+    rm_importer_vat_number = lib.OptionEnum("importerVATNumber")
+    rm_importer_eori_number = lib.OptionEnum("importerEORINumber")
+    rm_importer_tax_code = lib.OptionEnum("importerTaxCode")
 
-    is_recipient_a_business = lib.OptionEnum("is_recipient_a_business", bool)
-    send_notifications_to = lib.OptionEnum("send_notifications_to")
-    receive_email_notification = lib.OptionEnum("receive_email_notification", bool)
-    receive_sms_notification = lib.OptionEnum("receive_sms_notification", bool)
-    request_signature_upon_delivery = lib.OptionEnum("request_signature_upon_delivery", bool)
-    is_local_collect = lib.OptionEnum("is_local_collect", bool)
-    safe_place = lib.OptionEnum("safe_place")
-    department = lib.OptionEnum("department")
-    consequential_loss = lib.OptionEnum("consequential_loss", int)
-
-    air_number = lib.OptionEnum("air_number")
-    ioss_number = lib.OptionEnum("ioss_number")
-    requires_export_license = lib.OptionEnum("requires_export_license", bool)
-    commercial_invoice_number = lib.OptionEnum("commercial_invoice_number")
-    commercial_invoice_date = lib.OptionEnum("commercial_invoice_date")
-    recipient_eori_number = lib.OptionEnum("recipient_eori_number")
-
-    contains_dangerous_goods = lib.OptionEnum("contains_dangerous_goods", bool)
-    dangerous_goods_un_code = lib.OptionEnum("dangerous_goods_un_code")
-    dangerous_goods_description = lib.OptionEnum("dangerous_goods_description")
-    dangerous_goods_quantity = lib.OptionEnum("dangerous_goods_quantity", float)
-
-    billing = lib.OptionEnum("billing", dict)
-    importer = lib.OptionEnum("importer", dict)
-    tags = lib.OptionEnum("tags", list)
-    address_book_reference = lib.OptionEnum("address_book_reference")
-    carrier_name = lib.OptionEnum("carrier_name")
-
+    """ Unified Options type mapping """
+    shipment_date = rm_order_date
+    signature_confirmation = rm_request_signature_upon_delivery
+    dangerous_goods = rm_contains_dangerous_goods
 
 def shipping_options_initializer(
     options: dict,
@@ -331,7 +314,7 @@ def shipping_options_initializer(
         options.update(package_options.content)
 
     def items_filter(key: str) -> bool:
-        return key in ShippingOption  # type: ignore
+        return key in ShippingOption # type: ignore
 
     return units.ShippingOptions(options, ShippingOption, items_filter=items_filter)
 
@@ -571,3 +554,14 @@ def resolve_package_format(
         return PackagingType.large_parcel.value
 
     return PackagingType.small_parcel.value
+
+def resolve_customs_category(category):
+    mapping = {
+        "documents": "documents",
+        "gift": "gift",
+        "merchandise": "saleOfGoods",
+        "return_merchandise": "returnedGoods",
+        "other": "other",
+    }
+
+    return mapping.get(category, "none")

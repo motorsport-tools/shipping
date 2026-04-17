@@ -59,6 +59,13 @@ class Settings(core.Settings):
     @property
     def label_type(self) -> str:
         return self.connection_config.label_type.state or "PDF"
+    
+    @property
+    def default_currency(self) -> typing.Optional[str]:
+        if self.account_country_code in SUPPORTED_COUNTRY_CURRENCY:
+            return units.CountryCurrency.map(self.account_country_code).value
+
+        return "GBP"
 
 def _format_order_identifier(value: typing.Any) -> str:
     """
@@ -127,3 +134,5 @@ def get_option(options, name: str, default=None):
         return _option_value(value)
 
     return default
+
+SUPPORTED_COUNTRY_CURRENCY = ["GB"]
