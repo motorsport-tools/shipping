@@ -1,5 +1,12 @@
-"""Royal Mail Click and Drop carrier tests fixtures."""
+
+"""Royal Mail Click and Drop carrier tests fixtures.
+all payloads should be contained in this single file for eas of use
+"""
+from __future__ import annotations
+
 import copy
+from unittest.mock import ANY
+
 import karrio.sdk as karrio
 
 
@@ -14,7 +21,11 @@ gateway = karrio.gateway["royalmail_clickdrop"].create(
     )
 )
 
-ShipmentPayload = {
+# ---------------------------------------------------------------------------
+# Shipment payload catalog
+# ---------------------------------------------------------------------------
+
+ShipmentPayloadRichBase = {
     "shipper": {
         "address_line1": "123 Test Street",
         "city": "London",
@@ -116,26 +127,64 @@ ShipmentPayload = {
     },
 }
 
-ShipmentPayloadWithCN = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadInternational = copy.deepcopy(ShipmentPayloadWithoutBilling)
+ShipmentPayloadInternational["recipient"].update(
+    {
+        "address_line1": "10 Rue de Rivoli",
+        "city": "Paris",
+        "postal_code": "75001",
+        "country_code": "FR",
+        "state_code": "",
+        "person_name": "Jean Martin",
+        "company_name": "Example FR",
+        "phone_number": "0102030405",
+        "email": "jean@example.fr",
+    }
+)
+ShipmentPayloadInternational["reference"] = "ORDER-INTL-1001"
+ShipmentPayloadInternational["options"].update(
+    {
+        "order_reference": "ORDER-INTL-1001",
+        "include_cn": True,
+        "commercial_invoice_number": "INV-INTL-1001",
+        "commercial_invoice_date": "2024-01-01T10:00:00Z",
+        "ioss_number": "IM2760000000",
+        "recipient_eori_number": "FR12345678900013",
+        "requires_export_license": False,
+    }
+)
+
+ShipmentPayloadWithOrderExtras = copy.deepcopy(ShipmentPayloadRichBase)
+ShipmentPayloadWithOrderExtras["reference"] = "ORDER-EXTRA-1001"
+ShipmentPayloadWithOrderExtras["options"].update(
+    {
+        "order_reference": "ORDER-EXTRA-1001",
+        "planned_despatch_date": "2024-01-02T10:00:00Z",
+        "special_instructions": "Leave with dispatch desk",
+        "other_costs": 1.25,
+    }
+)
+
+ShipmentPayloadWithCN = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadWithCN["reference"] = "ORDER-1001-CN"
 ShipmentPayloadWithCN["options"]["order_reference"] = "ORDER-1001-CN"
 ShipmentPayloadWithCN["options"]["include_cn"] = True
 
-ShipmentPayloadWithReturnsLabel = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadWithReturnsLabel = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadWithReturnsLabel["reference"] = "ORDER-1001-RET"
 ShipmentPayloadWithReturnsLabel["options"]["order_reference"] = "ORDER-1001-RET"
 ShipmentPayloadWithReturnsLabel["options"]["include_returns_label"] = True
 
-ShipmentPayloadWithoutBilling = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadWithoutBilling = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadWithoutBilling["options"].pop("billing", None)
 
-ShipmentPayloadWithoutImporter = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadWithoutImporter = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadWithoutImporter["options"].pop("importer", None)
 
-ShipmentPayloadWithoutTags = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadWithoutTags = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadWithoutTags["options"].pop("tags", None)
 
-ShipmentPayloadWithoutOptionalSections = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadWithoutOptionalSections = copy.deepcopy(ShipmentPayloadRichBase)
 for key in [
     "billing",
     "importer",
@@ -147,7 +196,7 @@ for key in [
 ]:
     ShipmentPayloadWithoutOptionalSections["options"].pop(key, None)
 
-ShipmentPayloadNoExplicitTotals = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadNoExplicitTotals = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadNoExplicitTotals["reference"] = "ORDER-1001-NO-TOTALS"
 ShipmentPayloadNoExplicitTotals["options"]["order_reference"] = "ORDER-1001-NO-TOTALS"
 ShipmentPayloadNoExplicitTotals["options"].pop("subtotal", None)
@@ -155,7 +204,7 @@ ShipmentPayloadNoExplicitTotals["options"].pop("total", None)
 ShipmentPayloadNoExplicitTotals["options"]["shipping_cost_charged"] = 3.5
 ShipmentPayloadNoExplicitTotals["options"]["order_tax"] = 1.2
 
-ShipmentPayloadMultiParcel = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadMultiParcel = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadMultiParcel["reference"] = "ORDER-1001-MULTI"
 ShipmentPayloadMultiParcel["options"]["order_reference"] = "ORDER-1001-MULTI"
 ShipmentPayloadMultiParcel["parcels"].append(
@@ -181,7 +230,7 @@ ShipmentPayloadMultiParcel["parcels"].append(
     }
 )
 
-ShipmentPayloadMultiItem = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadMultiItem = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadMultiItem["reference"] = "ORDER-1001-MULTI-ITEM"
 ShipmentPayloadMultiItem["options"]["order_reference"] = "ORDER-1001-MULTI-ITEM"
 ShipmentPayloadMultiItem["parcels"][0]["items"].append(
@@ -196,34 +245,21 @@ ShipmentPayloadMultiItem["parcels"][0]["items"].append(
     }
 )
 
-ShipmentPayloadInvalidService = copy.deepcopy(ShipmentPayload)
-ShipmentPayloadInvalidService["service"] = "not_a_service"
-ShipmentPayloadInvalidService["options"].pop("service_code", None)
 
-ShipmentPayloadEnvelopePackaging = copy.deepcopy(ShipmentPayload)
+
+ShipmentPayloadEnvelopePackaging = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadEnvelopePackaging["options"].pop("package_format_identifier", None)
 ShipmentPayloadEnvelopePackaging["parcels"][0]["packaging_type"] = "envelope"
 
-ShipmentPayloadInferredLetter = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadInferredLetter = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInferredLetter["options"].pop("package_format_identifier", None)
 ShipmentPayloadInferredLetter["parcels"][0].pop("packaging_type", None)
 ShipmentPayloadInferredLetter["parcels"][0]["weight"] = 80
 ShipmentPayloadInferredLetter["parcels"][0]["length"] = 20
 ShipmentPayloadInferredLetter["parcels"][0]["width"] = 15
 ShipmentPayloadInferredLetter["parcels"][0]["height"] = 0.4
-ShipmentPayloadInferredLetter["parcels"][0]["items"] = [
-    {
-        "sku": "SKU-LTR-1",
-        "description": "Letter insert",
-        "quantity": 1,
-        "value_amount": 2.5,
-        "weight": 20,
-        "hs_code": "491199",
-        "origin_country": "GB",
-    }
-]
 
-ShipmentPayloadInferredLargeLetter = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadInferredLargeLetter = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInferredLargeLetter["options"].pop("package_format_identifier", None)
 ShipmentPayloadInferredLargeLetter["parcels"][0].pop("packaging_type", None)
 ShipmentPayloadInferredLargeLetter["parcels"][0]["weight"] = 400
@@ -231,7 +267,7 @@ ShipmentPayloadInferredLargeLetter["parcels"][0]["length"] = 30
 ShipmentPayloadInferredLargeLetter["parcels"][0]["width"] = 20
 ShipmentPayloadInferredLargeLetter["parcels"][0]["height"] = 2
 
-ShipmentPayloadInferredParcel = copy.deepcopy(ShipmentPayload)
+ShipmentPayloadInferredParcel = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInferredParcel["options"].pop("package_format_identifier", None)
 ShipmentPayloadInferredParcel["parcels"][0].pop("packaging_type", None)
 ShipmentPayloadInferredParcel["parcels"][0]["weight"] = 1500
@@ -239,203 +275,439 @@ ShipmentPayloadInferredParcel["parcels"][0]["length"] = 40
 ShipmentPayloadInferredParcel["parcels"][0]["width"] = 30
 ShipmentPayloadInferredParcel["parcels"][0]["height"] = 10
 
-
-ShipmentResponse = """{
-  "successCount": 1,
-  "errorsCount": 0,
-  "createdOrders": [
-    {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "createdOn": "2024-01-01T10:00:00Z",
-      "orderDate": "2024-01-01T10:00:00Z",
-      "printedOn": "2024-01-01T10:01:00Z",
-      "manifestedOn": null,
-      "shippedOn": null,
-      "trackingNumber": "RM123456789GB",
-      "packages": [
+# Canonical shipment payload used by request/response equality tests.
+ShipmentPayload = {
+    "shipper": {
+        "address_line1": "123 Test Street",
+        "city": "London",
+        "postal_code": "SW1A1AA",
+        "country_code": "GB",
+        "person_name": "Warehouse User",
+        "company_name": "Test Warehouse",
+    },
+    "recipient": {
+        "address_line1": "1 High Street",
+        "city": "London",
+        "postal_code": "SW1A1AA",
+        "country_code": "GB",
+        "person_name": "John Smith",
+        "company_name": "Example Ltd",
+    },
+    "parcels": [
         {
-          "packageNumber": 1,
-          "trackingNumber": "RM123456789GB"
+            "weight": 500,
+            "weight_unit": "G",
+            "length": 25,
+            "width": 18,
+            "height": 5,
+            "dimension_unit": "CM",
+            "items": [
+                {
+                    "sku": "SKU-1",
+                    "description": "Blue T-Shirt",
+                    "quantity": 2,
+                    "value_amount": 12.5,
+                    "weight": 150,
+                    "hs_code": "610910",
+                    "origin_country": "GB",
+                    "metadata": {
+                        "customs_declaration_category": "saleOfGoods",
+                        "requires_export_licence": False,
+                        "stock_location": "A1",
+                        "use_origin_preference": True,
+                        "supplementary_units": 1,
+                    },
+                }
+            ],
         }
-      ],
-      "label": "JVBERi0xLjQKJcfs...",
-      "labelErrors": [],
-      "generatedDocuments": ["label"]
-    }
-  ],
-  "failedOrders": []
-}"""
+    ],
+    "service": "tracked_24",
+    "reference": "ORDER-1001",
+    "options": {
+        "package_format_identifier": "small_parcel",
+        "order_reference": "ORDER-1001",
+        "order_date": "2024-01-01T10:00:00Z",
+        "carrier_name": "Royal Mail OBA",
+        "subtotal": 25.0,
+        "shipping_cost_charged": 3.5,
+        "order_tax": 0.0,
+        "total": 28.5,
+        "receive_email_notification": True,
+        "receive_sms_notification": False,
+        "include_label_in_response": True,
+        "tags": [{"key": "channel", "value": "web"}],
+    },
+}
 
-ShipmentResponseWithoutTopLevelTracking = """{
-  "successCount": 1,
-  "errorsCount": 0,
-  "createdOrders": [
-    {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "createdOn": "2024-01-01T10:00:00Z",
-      "orderDate": "2024-01-01T10:00:00Z",
-      "printedOn": "2024-01-01T10:01:00Z",
-      "manifestedOn": null,
-      "shippedOn": null,
-      "trackingNumber": null,
-      "packages": [
+ShipmentRequest = {
+    "items": [
         {
-          "packageNumber": 1,
-          "trackingNumber": "RM999999999GB"
+            "orderReference": "ORDER-1001",
+            "recipient": {
+                "address": {
+                    "fullName": "John Smith",
+                    "companyName": "Example Ltd",
+                    "addressLine1": "1 High Street",
+                    "city": "London",
+                    "postcode": "SW1A1AA",
+                    "countryCode": "GB",
+                }
+            },
+            "sender": {"tradingName": "Test Warehouse"},
+            "packages": [
+                {
+                    "weightInGrams": 500,
+                    "packageFormatIdentifier": "smallParcel",
+                    "dimensions": {
+                        "heightInMms": 50,
+                        "widthInMms": 180,
+                        "depthInMms": 250,
+                    },
+                    "contents": [
+                        {
+                            "SKU": "SKU-1",
+                            "name": "Blue T-Shirt",
+                            "quantity": 2,
+                            "unitValue": 12.5,
+                            "unitWeightInGrams": 150,
+                            "customsDescription": "Blue T-Shirt",
+                            "extendedCustomsDescription": "Blue T-Shirt",
+                            "customsCode": "610910",
+                            "originCountryCode": "GB",
+                            "customsDeclarationCategory": "saleOfGoods",
+                            "requiresExportLicence": False,
+                            "stockLocation": "A1",
+                            "useOriginPreference": True,
+                            "supplementaryUnits": "1",
+                        }
+                    ],
+                }
+            ],
+            "orderDate": "2024-01-01T10:00:00Z",
+            "subtotal": 25.0,
+            "shippingCostCharged": 3.5,
+            "total": 28.5,
+            "currencyCode": "GBP",
+            "postageDetails": {
+                "serviceCode": "TPN24",
+                "carrierName": "Royal Mail OBA",
+                "receiveEmailNotification": True,
+                "receiveSmsNotification": False,
+            },
+            "tags": [{"key": "channel", "value": "web"}],
+            "label": {"includeLabelInResponse": True},
+            "orderTax": 0.0,
         }
-      ],
-      "label": "JVBERi0xLjQKJcfs...",
-      "labelErrors": [],
-      "generatedDocuments": ["label"]
-    }
-  ],
-  "failedOrders": []
-}"""
+    ]
+}
 
-ShipmentResponseWithMultiplePackages = """{
-  "successCount": 1,
-  "errorsCount": 0,
-  "createdOrders": [
-    {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "createdOn": "2024-01-01T10:00:00Z",
-      "orderDate": "2024-01-01T10:00:00Z",
-      "printedOn": "2024-01-01T10:01:00Z",
-      "manifestedOn": null,
-      "shippedOn": null,
-      "trackingNumber": null,
-      "packages": [
+ShipmentResponseCreatedOnly = {
+    "successCount": 1,
+    "errorsCount": 0,
+    "createdOrders": [
         {
-          "packageNumber": 1,
-          "trackingNumber": "RM111111111GB"
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": None,
+            "shippedOn": None,
+            "trackingNumber": "RM123456789GB",
+            "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+            "label": "JVBERi0xLjQKJcfs...",
+            "labelErrors": [],
+            "generatedDocuments": ["label"],
+        }
+    ],
+    "failedOrders": [],
+}
+
+ShipmentResponse = {
+    "successCount": 1,
+    "errorsCount": 0,
+    "createdOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": "2024-01-01T11:00:00Z",
+            "shippedOn": "2024-01-01T12:00:00Z",
+            "trackingNumber": "RM123456789GB",
+            "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+            "label": "JVBERi0xLjQKJcfs...",
+            "labelErrors": [],
+            "generatedDocuments": ["label"],
+        }
+    ],
+    "failedOrders": [],
+}
+
+ShipmentResponseWithoutTopLevelTracking = {
+    "successCount": 1,
+    "errorsCount": 0,
+    "createdOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": None,
+            "shippedOn": None,
+            "trackingNumber": None,
+            "packages": [{"packageNumber": 1, "trackingNumber": "RM999999999GB"}],
+            "label": "JVBERi0xLjQKJcfs...",
+            "labelErrors": [],
+            "generatedDocuments": ["label"],
+        }
+    ],
+    "failedOrders": [],
+}
+
+ShipmentResponseWithMultiplePackages = {
+    "successCount": 1,
+    "errorsCount": 0,
+    "createdOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": None,
+            "shippedOn": None,
+            "trackingNumber": None,
+            "packages": [
+                {"packageNumber": 1, "trackingNumber": "RM111111111GB"},
+                {"packageNumber": 2, "trackingNumber": "RM222222222GB"},
+            ],
+            "label": "JVBERi0xLjQKJcfs...",
+            "labelErrors": [],
+            "generatedDocuments": ["label"],
+        }
+    ],
+    "failedOrders": [],
+}
+
+ShipmentResponseWithoutLabel = {
+    "successCount": 1,
+    "errorsCount": 0,
+    "createdOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": None,
+            "shippedOn": None,
+            "trackingNumber": "RM123456789GB",
+            "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+            "label": None,
+            "labelErrors": [],
+            "generatedDocuments": [],
+        }
+    ],
+    "failedOrders": [],
+}
+
+ShipmentResponseEmptyCreatedOrders = {
+    "successCount": 0,
+    "errorsCount": 0,
+    "createdOrders": [],
+    "failedOrders": [],
+}
+
+ShipmentResponseWithoutTracking = {
+    "successCount": 1,
+    "errorsCount": 0,
+    "createdOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": None,
+            "shippedOn": None,
+            "packages": [{"packageNumber": 1}],
+            "label": "JVBERi0xLjQKJcfs...",
+            "labelErrors": [],
+            "generatedDocuments": ["label"],
+        }
+    ],
+    "failedOrders": [],
+}
+
+ShipmentErrorResponse = {
+    "code": "BadRequest",
+    "message": "The request is invalid",
+    "details": "One or more validation errors occurred",
+}
+
+ShipmentArrayErrorResponse = [
+    {
+        "accountOrderNumber": 987,
+        "channelOrderReference": "WEB-123",
+        "code": "BadRequest",
+        "message": "Invalid shipment request",
+    }
+]
+
+ShipmentNestedErrorsResponse = {
+    "errors": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "code": "BadRequest",
+            "description": "Validation failed",
         },
         {
-          "packageNumber": 2,
-          "trackingNumber": "RM222222222GB"
-        }
-      ],
-      "label": "JVBERi0xLjQKJcfs...",
-      "labelErrors": [],
-      "generatedDocuments": ["label"]
-    }
-  ],
-  "failedOrders": []
-}"""
+            "orderIdentifier": 12345679,
+            "orderReference": "ORDER-1002",
+            "code": "Forbidden",
+            "description": "Service not available",
+        },
+    ]
+}
 
-ShipmentResponseWithoutLabel = """{
-  "successCount": 1,
-  "errorsCount": 0,
-  "createdOrders": [
+ParsedShipmentResponse = [
     {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "createdOn": "2024-01-01T10:00:00Z",
-      "orderDate": "2024-01-01T10:00:00Z",
-      "printedOn": "2024-01-01T10:01:00Z",
-      "manifestedOn": null,
-      "shippedOn": null,
-      "trackingNumber": "RM123456789GB",
-      "packages": [
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "tracking_number": "RM123456789GB",
+        "shipment_identifier": "12345678",
+        "label_type": "PDF",
+        "docs": ANY,
+        "meta": {
+            "order_identifier": 12345678,
+            "order_reference": "ORDER-1001",
+            "created_on": "2024-01-01T10:00:00Z",
+            "order_date": "2024-01-01T10:00:00Z",
+            "printed_on": "2024-01-01T10:01:00Z",
+            "manifested_on": "2024-01-01T11:00:00Z",
+            "shipped_on": "2024-01-01T12:00:00Z",
+            "tracking_numbers": ["RM123456789GB"],
+            "shipment_identifiers": ["12345678", "ORDER-1001"],
+            "package_tracking_numbers": ["RM123456789GB"],
+            "generated_documents": ["label"],
+            "tracking_number_provided": True,
+        },
+    },
+    [],
+]
+
+ParsedShipmentErrorResponse = [
+    None,
+    [
         {
-          "packageNumber": 1,
-          "trackingNumber": "RM123456789GB"
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "BadRequest",
+            "message": "The request is invalid",
+            "details": {
+                "operation": "create_shipment",
+                "details": "One or more validation errors occurred",
+            },
         }
-      ],
-      "label": null,
-      "labelErrors": [],
-      "generatedDocuments": []
-    }
-  ],
-  "failedOrders": []
-}"""
+    ],
+]
 
-ShipmentResponseEmptyCreatedOrders = """{
-  "successCount": 0,
-  "errorsCount": 0,
-  "createdOrders": [],
-  "failedOrders": []
-}"""
+ShipmentPayloadMissingBillingPostcode = copy.deepcopy(ShipmentPayloadRichBase)
 
-ShipmentErrorResponse = """{
-  "code": "BadRequest",
-  "message": "The request is invalid",
-  "details": "One or more validation errors occurred"
-}"""
+billing = ShipmentPayloadMissingBillingPostcode["options"].get("billing", {})
 
-ShipmentArrayErrorResponse = """[
-  {
-    "accountOrderNumber": 987,
-    "channelOrderReference": "WEB-123",
-    "code": "BadRequest",
-    "message": "Invalid shipment request"
-  }
-]"""
+# Support both the current flat fixture shape and any future nested shape.
+if isinstance(billing.get("address"), dict):
+    billing["address"].pop("postcode", None)
+    billing["address"].pop("postalCode", None)
+    billing["address"].pop("postal_code", None)
 
-ShipmentNestedErrorsResponse = """{
-  "errors": [
+billing.pop("postcode", None)
+billing.pop("postalCode", None)
+billing.pop("postal_code", None)
+# ---------------------------------------------------------------------------
+# Cancel shipment
+# ---------------------------------------------------------------------------
+
+# Karrio stores shipment/order identifiers as strings, but Royal Mail expects
+# numeric order identifiers to remain unquoted in the path.
+ShipmentCancelPayload = {"shipment_identifier": "12345678"}
+ShipmentCancelReferencePayload = {"shipment_identifier": "ORDER-1001"}
+
+ShipmentCancelRequest = {"orderIdentifiers": "12345678"}
+
+ShipmentCancelResponse = {
+    "deletedOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "orderInfo": "Deleted successfully",
+        }
+    ],
+    "errors": [],
+}
+
+ShipmentCancelErrorResponse = [
     {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "code": "BadRequest",
-      "description": "Validation failed"
+        "accountOrderNumber": 987,
+        "channelOrderReference": "WEB-123",
+        "code": "NotFound",
+        "message": "Order not found",
+    }
+]
+
+ShipmentCancelMultiErrorResponse = [
+    {
+        "accountOrderNumber": 987,
+        "channelOrderReference": "WEB-123",
+        "code": "NotFound",
+        "message": "Order not found",
     },
     {
-      "orderIdentifier": 12345679,
-      "orderReference": "ORDER-1002",
-      "code": "Forbidden",
-      "description": "Service not available"
-    }
-  ]
-}"""
+        "accountOrderNumber": 988,
+        "channelOrderReference": "WEB-124",
+        "code": "Forbidden",
+        "message": "Order already manifested",
+    },
+]
 
-
-ShipmentCancelPayload = {
-    "shipment_identifier": "12345678"
-}
-
-ShipmentCancelReferencePayload = {
-    "shipment_identifier": "ORDER-1001"
-}
-
-ShipmentCancelResponse = """{
-  "deletedOrders": [
+ParsedShipmentCancelResponse = [
     {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "orderInfo": "Deleted successfully"
-    }
-  ],
-  "errors": []
-}"""
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "operation": "Cancel Shipment",
+        "success": True,
+    },
+    [],
+]
 
-ShipmentCancelErrorResponse = """[
-  {
-    "accountOrderNumber": 987,
-    "channelOrderReference": "WEB-123",
-    "code": "NotFound",
-    "message": "Order not found"
-  }
-]"""
+ParsedShipmentCancelErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "NotFound",
+            "message": "Order not found",
+            "details": {
+                "account_order_number": 987,
+                "channel_order_reference": "WEB-123",
+            },
+        }
+    ],
+]
 
-ShipmentCancelMultiErrorResponse = """[
-  {
-    "accountOrderNumber": 987,
-    "channelOrderReference": "WEB-123",
-    "code": "NotFound",
-    "message": "Order not found"
-  },
-  {
-    "accountOrderNumber": 988,
-    "channelOrderReference": "WEB-124",
-    "code": "Forbidden",
-    "message": "Order already manifested"
-  }
-]"""
+# ---------------------------------------------------------------------------
+# Manifest creation / retrieval / retry
+# ---------------------------------------------------------------------------
 
-
+# Karrio's generic ManifestRequest can include shipment_identifiers, but
+# Royal Mail Click & Drop manifest creation does not accept them in the
+# request body. The provider ignores them and sends only `carrierName`.
 ManifestPayload = {
     "shipment_identifiers": ["12345678", "12345679"],
     "address": {
@@ -449,46 +721,136 @@ ManifestPayload = {
         "phone_number": "07111111111",
         "email": "warehouse@example.com",
     },
-    "options": {
-        "carrier_name": "Royal Mail OBA"
-    },
+    "options": {"carrier_name": "Royal Mail OBA"},
 }
 
 ManifestPayloadSingleOrder = copy.deepcopy(ManifestPayload)
 ManifestPayloadSingleOrder["shipment_identifiers"] = ["12345678"]
 
-ManifestResponse = """{
-  "manifestNumber": 1001,
-  "documentPdf": "JVBERi0xLjQKJcfs..."
-}"""
+ManifestRequest = {"carrierName": "Royal Mail OBA"}
 
-ManifestResponseWithoutPdf = """{
-  "manifestNumber": 1002,
-  "documentPdf": null
-}"""
+ManifestResponse = {"manifestNumber": 1001, "documentPdf": "JVBERi0xLjQKJcfs..."}
 
-ManifestErrorResponse = """{
-  "errors": [
+ManifestResponseWithoutPdf = {"manifestNumber": 1002, "documentPdf": None}
+
+ManifestErrorResponse = {
+    "errors": [{"code": "Forbidden", "description": "Feature not available"}]
+}
+
+ManifestNestedErrorResponse = {
+    "errors": [
+        {"code": "Forbidden", "description": "Feature not available"},
+        {"code": "BadRequest", "description": "No eligible orders found"},
+    ]
+}
+
+ParsedManifestResponse = [
     {
-      "code": "Forbidden",
-      "description": "Feature not available"
-    }
-  ]
-}"""
-
-ManifestNestedErrorResponse = """{
-  "errors": [
-    {
-      "code": "Forbidden",
-      "description": "Feature not available"
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "doc": ANY,
+        "meta": {
+            "manifest_number": 1001,
+            "status": "completed",
+            "document_available": True,
+        },
     },
-    {
-      "code": "BadRequest",
-      "description": "No eligible orders found"
-    }
-  ]
-}"""
+    [],
+]
 
+ParsedManifestErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "Forbidden",
+            "message": "Feature not available",
+            "details": {"operation": "manifest"},
+        }
+    ],
+]
+
+GetManifestPayload = {"manifest_number": 1001}
+
+ManifestIdentifierRequest = {"manifestIdentifier": 1001}
+
+GetManifestResponse = {
+    "manifestNumber": 1001,
+    "status": "Completed",
+    "documentPdf": "JVBERi0xLjQKJcfs...",
+}
+
+GetManifestErrorResponse = {
+    "errors": [{"code": "Forbidden", "description": "Manifest not found"}]
+}
+
+ParsedGetManifestResponse = [
+    {
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "doc": ANY,
+        "meta": {
+            "manifest_number": 1001,
+            "status": "completed",
+            "document_available": True,
+        },
+    },
+    [],
+]
+
+ParsedGetManifestErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "Forbidden",
+            "message": "Manifest not found",
+            "details": {"operation": "manifest"},
+        }
+    ],
+]
+
+RetryManifestPayload = {"manifest_number": 1002}
+
+RetryManifestIdentifierRequest = {"manifestIdentifier": 1002}
+
+RetryManifestResponse = {"manifestNumber": 1002}
+
+RetryManifestErrorResponse = {
+    "errors": [{"code": "BadRequest", "description": "Manifest cannot be retried"}]
+}
+
+ParsedRetryManifestResponse = [
+    {
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "meta": {
+            "manifest_number": 1002,
+            "status": "in_progress",
+            "document_available": False,
+        },
+    },
+    [],
+]
+
+ParsedRetryManifestErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "BadRequest",
+            "message": "Manifest cannot be retried",
+            "details": {"operation": "manifest"},
+        }
+    ],
+]
+
+# ---------------------------------------------------------------------------
+# Label retrieval
+# ---------------------------------------------------------------------------
 
 LabelPayload = {
     "order_identifiers": [12345678],
@@ -507,48 +869,71 @@ LabelPayloadWithReturnsLabel = {
     "include_returns_label": True,
 }
 
+LabelRequest = {
+    "orderIdentifiers": "12345678",
+    "query": {
+        "documentType": "postageLabel",
+        "includeReturnsLabel": False,
+        "includeCN": True,
+    },
+}
+
 LabelResponse = b"%PDF-1.4 test label pdf"
+
+LabelErrorResponse = [
+    {
+        "accountOrderNumber": 987,
+        "channelOrderReference": "WEB-123",
+        "code": "NotFound",
+        "message": "Order not found",
+    }
+]
 
 LabelErrorResponseBytes = b'[{"code":"NotFound","message":"Order not found"}]'
 
-LabelErrorResponse = """[
-  {
-    "accountOrderNumber": 987,
-    "channelOrderReference": "WEB-123",
-    "code": "NotFound",
-    "message": "Order not found"
-  }
-]"""
+LabelNestedErrorResponse = {
+    "errors": [
+        {
+            "accountOrderNumber": 987,
+            "channelOrderReference": "WEB-123",
+            "code": "NotFound",
+            "description": "Order not found",
+        }
+    ]
+}
 
-LabelNestedErrorResponse = """{
-  "errors": [
+ParsedLabelResponse = [
     {
-      "accountOrderNumber": 987,
-      "channelOrderReference": "WEB-123",
-      "code": "NotFound",
-      "description": "Order not found"
-    }
-  ]
-}"""
+        "label": "JVBERi0xLjQgdGVzdCBsYWJlbCBwZGY=",
+        "pdf_label": "JVBERi0xLjQgdGVzdCBsYWJlbCBwZGY=",
+    },
+    [],
+]
 
-
-OrderStatusPayload = {
-    "items": [
+ParsedLabelErrorResponse = [
+    None,
+    [
         {
-            "order_identifier": 12345678,
-            "status": "despatched"
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "NotFound",
+            "message": "Order not found",
+            "details": {
+                "account_order_number": 987,
+                "channel_order_reference": "WEB-123",
+                "operation": "get_label",
+            },
         }
-    ]
-}
+    ],
+]
 
-OrderStatusResetPayload = {
-    "items": [
-        {
-            "order_identifier": 12345678,
-            "status": "new"
-        }
-    ]
-}
+# ---------------------------------------------------------------------------
+# Order status
+# ---------------------------------------------------------------------------
+
+OrderStatusPayload = {"items": [{"order_identifier": 12345678, "status": "despatched"}]}
+
+OrderStatusResetPayload = {"items": [{"order_identifier": 12345678, "status": "new"}]}
 
 OrderStatusOtherCourierPayload = {
     "items": [
@@ -558,50 +943,95 @@ OrderStatusOtherCourierPayload = {
             "tracking_number": "OTHER123456",
             "despatch_date": "2024-01-01T12:00:00Z",
             "shipping_carrier": "Other Carrier",
-            "shipping_service": "Express"
+            "shipping_service": "Express",
         }
     ]
 }
 
-OrderStatusResponse = """{
-  "updatedOrders": [
-    {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "status": "despatched"
-    }
-  ],
-  "errors": []
-}"""
+OrderStatusRequest = {"items": [{"orderIdentifier": 12345678, "status": "despatched"}]}
 
-OrderStatusPartialSuccessResponse = """{
-  "updatedOrders": [
-    {
-      "orderIdentifier": 12345678,
-      "orderReference": "ORDER-1001",
-      "status": "despatched"
-    }
-  ],
-  "errors": [
-    {
-      "orderIdentifier": 12345679,
-      "orderReference": "ORDER-1002",
-      "code": "BadRequest",
-      "message": "Invalid status update request"
-    }
-  ]
-}"""
+OrderStatusResponse = {
+    "updatedOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "status": "despatched",
+        }
+    ],
+    "errors": [],
+}
 
-OrderStatusErrorResponse = """[
-  {
-    "orderIdentifier": 12345678,
-    "orderReference": "ORDER-1001",
-    "status": "despatched",
-    "code": "BadRequest",
-    "message": "Invalid status update request"
-  }
-]"""
+OrderStatusPartialSuccessResponse = {
+    "updatedOrders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "status": "despatched",
+        }
+    ],
+    "errors": [
+        {
+            "orderIdentifier": 12345679,
+            "orderReference": "ORDER-1002",
+            "code": "BadRequest",
+            "message": "Invalid status update request",
+        }
+    ],
+}
 
+OrderStatusErrorResponse = [
+    {
+        "orderIdentifier": 12345678,
+        "orderReference": "ORDER-1001",
+        "status": "despatched",
+        "code": "BadRequest",
+        "message": "Invalid status update request",
+    }
+]
+
+ParsedOrderStatusResponse = [
+    {
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "operation": "Update Order Status",
+        "success": True,
+    },
+    [],
+]
+
+ParsedOrderStatusErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "BadRequest",
+            "message": "Invalid status update request",
+            "details": {
+                "operation": "update_order_status",
+                "order_identifier": 12345678,
+                "order_reference": "ORDER-1001",
+            },
+        }
+    ],
+]
+
+# ---------------------------------------------------------------------------
+# Return shipment
+# ---------------------------------------------------------------------------
+
+ParsedReturnShipmentWithoutShipmentResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "return_shipment_error",
+            "message": "Unable to parse return shipment response",
+            "details": {"operation": "create_return_shipment"},
+        }
+    ],
+]
 
 ReturnShipmentPayload = {
     "shipper": {
@@ -656,13 +1086,9 @@ ReturnShipmentPayloadESCountry["shipper"]["country_code"] = "ES"
 ReturnShipmentPayloadESCountry["recipient"]["country_code"] = "ES"
 
 ReturnShipmentRequest = {
-    "service": {
-        "serviceCode": "TSS"
-    },
+    "service": {"serviceCode": "TSS"},
     "shipment": {
-        "customerReference": {
-            "reference": "ORDER-1001"
-        },
+        "customerReference": {"reference": "ORDER-1001"},
         "returnAddress": {
             "addressLine1": "123 Test Street",
             "city": "London",
@@ -682,49 +1108,95 @@ ReturnShipmentRequest = {
             "firstName": "John",
             "lastName": "Smith",
             "postcode": "SW1A1AA",
-        }
-    }
+        },
+    },
 }
 
-ReturnShipmentResponse = """{
-  "shipment": {
-    "trackingNumber": "RM123456789GB",
-    "uniqueItemId": "0A12345678901234"
-  },
-  "qrCode": "iVBORw0KGgoAAAANSUhEUgAA...",
-  "label": "JVBERi0xLjQKJcfs..."
-}"""
+ReturnShipmentResponse = {
+    "shipment": {
+        "trackingNumber": "RM123456789GB",
+        "uniqueItemId": "0A12345678901234",
+    },
+    "qrCode": "iVBORw0KGgoAAAANSUhEUgAA...",
+    "label": "JVBERi0xLjQKJcfs...",
+}
 
-ReturnShipmentResponseWithoutLabel = """{
-  "shipment": {
-    "trackingNumber": "RM123456789GB",
-    "uniqueItemId": "0A12345678901234"
-  },
-  "qrCode": "iVBORw0KGgoAAAANSUhEUgAA...",
-  "label": null
-}"""
+ReturnShipmentResponseWithoutLabel = {
+    "shipment": {
+        "trackingNumber": "RM123456789GB",
+        "uniqueItemId": "0A12345678901234",
+    },
+    "qrCode": "iVBORw0KGgoAAAANSUhEUgAA...",
+    "label": None,
+}
 
-ReturnShipmentResponseWithoutShipment = """{
-  "shipment": null,
-  "qrCode": "iVBORw0KGgoAAAANSUhEUgAA...",
-  "label": "JVBERi0xLjQKJcfs..."
-}"""
+ReturnShipmentResponseWithoutShipment = {
+    "shipment": None,
+    "qrCode": "iVBORw0KGgoAAAANSUhEUgAA...",
+    "label": "JVBERi0xLjQKJcfs...",
+}
 
-ReturnShipmentErrorResponse = """{
-  "code": "BadRequest",
-  "message": "Invalid return request",
-  "details": "Service code TSS is not available for this account"
-}"""
+ReturnShipmentResponseWithoutTracking = {
+    "shipment": {"uniqueItemId": "0A12345678901234"},
+    "qrCode": "iVBORw0KGgoAAAANSUhEUgAA...",
+    "label": "JVBERi0xLjQKJcfs...",
+}
 
-ReturnShipmentArrayErrorResponse = """[
-  {
-    "accountOrderNumber": 987,
-    "channelOrderReference": "WEB-123",
+ReturnShipmentErrorResponse = {
     "code": "BadRequest",
-    "message": "Invalid return request"
-  }
-]"""
+    "message": "Invalid return request",
+    "details": "Service code TSS is not available for this account",
+}
 
+ReturnShipmentArrayErrorResponse = [
+    {
+        "accountOrderNumber": 987,
+        "channelOrderReference": "WEB-123",
+        "code": "BadRequest",
+        "message": "Invalid return request",
+    }
+]
+
+ParsedReturnShipmentResponse = [
+    {
+        "carrier_id": "royalmail_clickdrop",
+        "carrier_name": "royalmail_clickdrop",
+        "tracking_number": "RM123456789GB",
+        "shipment_identifier": "0A12345678901234",
+        "label_type": "PDF",
+        "docs": {
+            "label": "JVBERi0xLjQKJcfs...",
+            "pdf_label": "JVBERi0xLjQKJcfs...",
+        },
+        "meta": {
+            "qr_code": "iVBORw0KGgoAAAANSUhEUgAA...",
+            "is_return": True,
+            "unique_item_id": "0A12345678901234",
+            "tracking_number_provided": True,
+        },
+    },
+    [],
+]
+
+ParsedReturnShipmentErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "BadRequest",
+            "message": "Invalid return request",
+            "details": {
+                "operation": "create_return_shipment",
+                "details": "Service code TSS is not available for this account",
+            },
+        }
+    ],
+]
+
+# ---------------------------------------------------------------------------
+# Service / settings expectations
+# ---------------------------------------------------------------------------
 
 ExpectedCoreServices = ["tpn24_01", "fe0_01"]
 ExpectedReturnServices = ["TSS"]
@@ -732,3 +1204,506 @@ ExpectedDefaultConnectionConfig = {
     "base_url": "https://api.parcel.royalmail.com/api/v1",
     "label_type": "PDF",
 }
+
+# ---------------------------------------------------------------------------
+# Get order details
+# ---------------------------------------------------------------------------
+
+GetOrderDetailsPayload = {"order_identifiers": [12345678]}
+
+OrderLookupRequest = {"orderIdentifiers": "12345678"}
+
+GetOrderDetailsResponse = [
+    {
+        "orderIdentifier": 12345678,
+        "orderStatus": "new",
+        "createdOn": "2024-01-01T10:00:00Z",
+        "printedOn": "2024-01-01T10:01:00Z",
+        "shippedOn": None,
+        "postageAppliedOn": "2024-01-01T10:01:00Z",
+        "manifestedOn": None,
+        "orderDate": "2024-01-01T10:00:00Z",
+        "tradingName": "Test Warehouse",
+        "department": "Dispatch",
+        "orderReference": "ORDER-1001",
+        "subtotal": 25.0,
+        "shippingCostCharged": 3.5,
+        "total": 28.5,
+        "weightInGrams": 500,
+        "currencyCode": "GBP",
+        "shippingDetails": {
+            "shippingCost": 3.5,
+            "trackingNumber": "RM123456789GB",
+            "serviceCode": "TPN24",
+            "shippingService": "Royal Mail Tracked 24",
+            "shippingCarrier": "Royal Mail",
+            "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+        },
+        "shippingInfo": {
+            "firstName": "John",
+            "lastName": "Smith",
+            "companyName": "Example Ltd",
+            "addressLine1": "1 High Street",
+            "city": "London",
+            "postcode": "SW1A1AA",
+            "countryCode": "GB",
+        },
+        "billingInfo": {
+            "firstName": "John",
+            "lastName": "Smith",
+            "companyName": "Example Ltd",
+            "addressLine1": "1 High Street",
+            "city": "London",
+            "postcode": "SW1A1AA",
+            "countryCode": "GB",
+        },
+        "orderLines": [
+            {
+                "SKU": "SKU-1",
+                "name": "Blue T-Shirt",
+                "quantity": 2,
+                "unitValue": 12.5,
+                "lineTotal": 25.0,
+                "customsCode": 610910,
+            }
+        ],
+        "tags": [{"key": "channel", "value": "web"}],
+    }
+]
+
+GetOrderDetailsErrorResponse = [
+    {
+        "accountOrderNumber": 987,
+        "channelOrderReference": "WEB-123",
+        "code": "NotFound",
+        "message": "Order details not found",
+    }
+]
+
+ParsedGetOrderDetailsResponse = [
+    [
+        {
+            "orderIdentifier": 12345678,
+            "orderStatus": "new",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "postageAppliedOn": "2024-01-01T10:01:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "tradingName": "Test Warehouse",
+            "department": "Dispatch",
+            "orderReference": "ORDER-1001",
+            "subtotal": 25.0,
+            "shippingCostCharged": 3.5,
+            "total": 28.5,
+            "weightInGrams": 500,
+            "currencyCode": "GBP",
+            "shippingDetails": ANY,
+            "shippingInfo": ANY,
+            "billingInfo": ANY,
+            "orderLines": ANY,
+            "tags": ANY,
+        }
+    ],
+    [],
+]
+
+ParsedGetOrderDetailsErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "NotFound",
+            "message": "Order details not found",
+            "details": {
+                "operation": "get_order_details",
+                "account_order_number": 987,
+                "channel_order_reference": "WEB-123",
+            },
+        }
+    ],
+]
+
+# ---------------------------------------------------------------------------
+# Get order
+# ---------------------------------------------------------------------------
+
+GetOrderPayload = {"order_identifiers": [12345678]}
+
+GetOrderResponse = [
+    {
+        "orderIdentifier": 12345678,
+        "orderReference": "ORDER-1001",
+        "createdOn": "2024-01-01T10:00:00Z",
+        "orderDate": "2024-01-01T10:00:00Z",
+        "printedOn": "2024-01-01T10:01:00Z",
+        "manifestedOn": None,
+        "shippedOn": None,
+        "trackingNumber": "RM123456789GB",
+        "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+    }
+]
+
+GetOrderErrorResponse = [
+    {
+        "accountOrderNumber": 987,
+        "channelOrderReference": "WEB-123",
+        "code": "NotFound",
+        "message": "Order not found",
+    }
+]
+
+ParsedGetOrderResponse = [
+    [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "trackingNumber": "RM123456789GB",
+            "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+        }
+    ],
+    [],
+]
+
+ParsedGetOrderErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "NotFound",
+            "message": "Order not found",
+            "details": {
+                "operation": "get_order",
+                "account_order_number": 987,
+                "channel_order_reference": "WEB-123",
+            },
+        }
+    ],
+]
+
+# ---------------------------------------------------------------------------
+# Rate
+# ---------------------------------------------------------------------------
+
+RatePayload = {
+    "shipper": {
+        "postal_code": "SW1A1AA",
+        "city": "London",
+        "country_code": "GB",
+        "address_line1": "123 Test Street",
+        "person_name": "Warehouse User",
+        "company_name": "Test Warehouse",
+    },
+    "recipient": {
+        "postal_code": "BT11AA",
+        "city": "Belfast",
+        "country_code": "GB",
+        "address_line1": "3 Import Road",
+        "person_name": "John Smith",
+        "company_name": "Example Ltd",
+    },
+    "parcels": [
+        {
+            "weight": 0.5,
+            "weight_unit": "KG",
+            "length": 25,
+            "width": 18,
+            "height": 5,
+            "dimension_unit": "CM",
+            "packaging_type": "small_box",
+        }
+    ],
+    "options": {"currency": "GBP"},
+}
+
+RateResponse = {
+    "rates": [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "service": "tpn24_01",
+            "currency": "GBP",
+            "total_charge": 8.5,
+            "transit_days": 1,
+            "meta": {
+                "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
+                "rate_provider": "rate_table",
+            },
+        }
+    ],
+    "messages": [],
+}
+
+RateErrorResponse = {
+    "rates": [],
+    "messages": [{"code": "rate_table_error", "message": "No matching rate table entry found"}],
+}
+
+ParsedRateResponse = [
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "service": "tpn24_01",
+            "currency": "GBP",
+            "total_charge": 8.5,
+            "transit_days": 1,
+            "meta": {
+                "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
+                "rate_provider": "rate_table",
+            },
+        }
+    ],
+    [],
+]
+
+ParsedRateErrorResponse = [
+    [],
+    [{"code": "rate_table_error", "message": "No matching rate table entry found"}],
+]
+
+# ---------------------------------------------------------------------------
+# List orders / order details
+# ---------------------------------------------------------------------------
+
+ListOrdersPayload = {
+    "page_size": 2,
+    "start_date_time": "2024-01-01T00:00:00Z",
+    "end_date_time": "2024-01-31T23:59:59Z",
+    "continuation_token": "NEXT123",
+}
+
+OrdersLookupRequest = {
+    "pageSize": 2,
+    "startDateTime": "2024-01-01T00:00:00Z",
+    "endDateTime": "2024-01-31T23:59:59Z",
+    "continuationToken": "NEXT123",
+}
+
+ListOrdersResponse = {
+    "orders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderReference": "ORDER-1001",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "orderDate": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": None,
+            "shippedOn": None,
+            "trackingNumber": "RM123456789GB",
+            "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+        }
+    ],
+    "continuationToken": "NEXT456",
+}
+
+ListOrdersErrorResponse = {"code": "BadRequest", "message": "Invalid paging request"}
+
+ParsedListOrdersResponse = [
+    {
+        "orders": [
+            {
+                "orderIdentifier": 12345678,
+                "orderReference": "ORDER-1001",
+                "createdOn": "2024-01-01T10:00:00Z",
+                "orderDate": "2024-01-01T10:00:00Z",
+                "printedOn": "2024-01-01T10:01:00Z",
+                "trackingNumber": "RM123456789GB",
+                "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+            }
+        ],
+        "continuationToken": "NEXT456",
+    },
+    [],
+]
+
+ParsedListOrdersErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "BadRequest",
+            "message": "Invalid paging request",
+            "details": {"operation": "list_orders"},
+        }
+    ],
+]
+
+ListOrderDetailsPayload = {
+    "page_size": 2,
+    "start_date_time": "2024-01-01T00:00:00Z",
+    "end_date_time": "2024-01-31T23:59:59Z",
+    "continuation_token": "NEXT123",
+}
+
+ListOrderDetailsResponse = {
+    "orders": [
+        {
+            "orderIdentifier": 12345678,
+            "orderStatus": "new",
+            "createdOn": "2024-01-01T10:00:00Z",
+            "printedOn": "2024-01-01T10:01:00Z",
+            "shippedOn": None,
+            "postageAppliedOn": "2024-01-01T10:01:00Z",
+            "manifestedOn": None,
+            "orderDate": "2024-01-01T10:00:00Z",
+            "tradingName": "Test Warehouse",
+            "department": "Dispatch",
+            "orderReference": "ORDER-1001",
+            "subtotal": 25.0,
+            "shippingCostCharged": 3.5,
+            "total": 28.5,
+            "weightInGrams": 500,
+            "currencyCode": "GBP",
+            "shippingDetails": {
+                "shippingCost": 3.5,
+                "trackingNumber": "RM123456789GB",
+                "serviceCode": "TPN24",
+                "shippingService": "Royal Mail Tracked 24",
+                "shippingCarrier": "Royal Mail",
+                "packages": [{"packageNumber": 1, "trackingNumber": "RM123456789GB"}],
+            },
+            "shippingInfo": {
+                "firstName": "John",
+                "lastName": "Smith",
+                "companyName": "Example Ltd",
+                "addressLine1": "1 High Street",
+                "city": "London",
+                "postcode": "SW1A1AA",
+                "countryCode": "GB",
+            },
+            "billingInfo": {
+                "firstName": "John",
+                "lastName": "Smith",
+                "companyName": "Example Ltd",
+                "addressLine1": "1 High Street",
+                "city": "London",
+                "postcode": "SW1A1AA",
+                "countryCode": "GB",
+            },
+            "orderLines": [
+                {
+                    "SKU": "SKU-1",
+                    "name": "Blue T-Shirt",
+                    "quantity": 2,
+                    "unitValue": 12.5,
+                    "lineTotal": 25.0,
+                    "customsCode": 610910,
+                }
+            ],
+            "tags": [{"key": "channel", "value": "web"}],
+        }
+    ],
+    "continuationToken": "NEXT456",
+}
+
+ListOrderDetailsErrorResponse = {
+    "code": "BadRequest",
+    "message": "Invalid order details lookup request",
+}
+
+ParsedListOrderDetailsResponse = [{"orders": ANY, "continuationToken": "NEXT456"}, []]
+
+ParsedListOrderDetailsErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "BadRequest",
+            "message": "Invalid order details lookup request",
+            "details": {"operation": "list_order_details"},
+        }
+    ],
+]
+
+# ---------------------------------------------------------------------------
+# Version / return services
+# ---------------------------------------------------------------------------
+
+VersionRequest = {}
+
+VersionResponse = {
+    "commit": "abcdef1234567890",
+    "build": "100",
+    "release": "1.0.0",
+    "releaseDate": "2024-01-01T00:00:00Z",
+}
+
+VersionErrorResponse = {
+    "code": "Forbidden",
+    "message": "Not authorised to view version information",
+}
+
+ParsedVersionResponse = [
+    {
+        "commit": "abcdef1234567890",
+        "build": "100",
+        "release": "1.0.0",
+        "releaseDate": "2024-01-01T00:00:00Z",
+    },
+    [],
+]
+
+ParsedVersionErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "Forbidden",
+            "message": "Not authorised to view version information",
+            "details": {"operation": "get_version"},
+        }
+    ],
+]
+
+ReturnServicesRequest = {}
+
+ReturnServicesResponse = {
+    "services": [
+        {
+            "carrierGuid": "carrier-guid-1",
+            "carrierServiceGuid": "service-guid-1",
+            "serviceName": "Tracked Returns 48",
+            "serviceCode": "TSS",
+        }
+    ]
+}
+
+ReturnServicesErrorResponse = {
+    "code": "Forbidden",
+    "message": "Not authorised to view return services",
+}
+
+ParsedReturnServicesResponse = [
+    {
+        "services": [
+            {
+                "carrierGuid": "carrier-guid-1",
+                "carrierServiceGuid": "service-guid-1",
+                "serviceName": "Tracked Returns 48",
+                "serviceCode": "TSS",
+            }
+        ]
+    },
+    [],
+]
+
+ParsedReturnServicesErrorResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "Forbidden",
+            "message": "Not authorised to view return services",
+            "details": {"operation": "get_return_services"},
+        }
+    ],
+]

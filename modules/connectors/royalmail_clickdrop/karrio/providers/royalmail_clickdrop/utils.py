@@ -1,6 +1,8 @@
 import base64
+import datetime
 import typing
 from urllib.parse import quote
+import karrio.core.units as units
 
 import karrio.lib as lib
 import karrio.core as core
@@ -70,11 +72,19 @@ class Settings(core.Settings):
 def _format_order_identifier(value: typing.Any) -> str:
     """
     Royal Mail orderIdentifiers rules:
-    - integers are passed as-is
-    - string references must be percent-encoded and wrapped in double quotes
+    - numeric order identifiers are passed as-is
+    - string order references must be percent-encoded and wrapped in double quotes
+
+    Karrio commonly stores carrier-generated numeric identifiers as strings
+    (for example "12345678"), so digit-only strings must also be treated as
+    numeric order identifiers to keep follow-up operations such as cancel,
+    get-order, get-order-details, and label retrieval working correctly.
     """
     if value is None:
         return ""
+
+    if isinstance(value, int):
+        return str(value)
 
     text = str(value).strip()
     if text == "":
@@ -83,7 +93,33 @@ def _format_order_identifier(value: typing.Any) -> str:
     if text.isdigit():
         return text
 
-    return f'"{quote(text, safe="")}"'
+    return quote(f'"{text}"', safe="")
+def get_value(obj, name: str, default=None):
+    """Return a field from either a dict payload or an object instance."""
+    if obj is None:
+        return default
+
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+
+    return getattr(obj, name, default)
+
+
+def to_datetime_string(value):
+    if value is None:
+        return None
+
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+
+    if isinstance(value, datetime.date):
+        return datetime.datetime.combine(
+            value,
+            datetime.time.min,
+            tzinfo=datetime.timezone.utc,
+        ).isoformat()
+
+    return value
 
 
 def make_order_identifiers(value: typing.Any) -> str:
@@ -121,6 +157,26 @@ def _option_value(option):
 
     return option
 
+NO_TRACKING_NUMBER = "no code provided"
+
+
+def resolve_tracking_number(*values: typing.Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+
+        if isinstance(value, (list, tuple, set)):
+            tracking_number = resolve_tracking_number(*value)
+            if tracking_number != NO_TRACKING_NUMBER:
+                return tracking_number
+
+            continue
+
+        text = str(value).strip()
+        if text:
+            return text
+
+    return NO_TRACKING_NUMBER
 
 def get_option(options, name: str, default=None):
     if options is None:

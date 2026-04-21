@@ -16,6 +16,10 @@ class ConnectionConfig(lib.Enum):
     include_label_in_response = lib.OptionEnum("include_label_in_response", bool, True, True)
     include_return_label_in_response = lib.OptionEnum("include_return_label_in_response", bool, False, False)
 
+    base_url = lib.OptionEnum("base_url", str)
+    carrier_name = lib.OptionEnum("carrier_name", str)
+    label_type = lib.OptionEnum("label_type", LabelType)
+
     shipping_options = lib.OptionEnum("shipping_options", list)
     shipping_services = lib.OptionEnum("shipping_services", list)
 
@@ -68,7 +72,34 @@ def _unit_code(unit) -> typing.Optional[str]:
 
 def _round_decimal(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+def _unit_code(unit) -> typing.Optional[str]:
+    if unit is None:
+        return None
 
+    value = getattr(unit, "value", unit)
+    return str(value).upper() if value is not None else None
+
+def _source_value(source, *keys):
+    if source is None:
+        return None
+
+    for key in keys:
+        value = source.get(key) if isinstance(source, dict) else getattr(source, key, None)
+        if value not in [None, ""]:
+            return value
+
+    return None
+
+
+def dimension_to_mms(value, unit=None, default=None) -> typing.Optional[int]:
+    amount = _decimal(value)
+    code = _unit_code(unit)
+
+    if amount is None:
+        return default
+
+    factor = _DIMENSION_FACTORS.get(code, Decimal("1")) if code is not None else Decimal("1")
+    return _round_decimal(amount * factor)
 
 def weight_to_grams(value, unit=None, default=None) -> typing.Optional[int]:
     amount = _decimal(value)
@@ -85,6 +116,15 @@ def weight_in_grams(weight, default=None) -> typing.Optional[int]:
     if weight is None:
         return default
 
+    # Prefer the normalized grams value when available.
+    # Karrio package weights may expose internal value/unit pairs that can
+    # introduce conversion drift. Using `.G` first keeps Royal Mail shipment
+    # payloads stable in grams, which is the carrier-native unit we need here.
+    if hasattr(weight, "G"):
+        grams = _decimal(weight.G)
+        if grams is not None:
+            return _round_decimal(grams)
+
     native = weight_to_grams(
         getattr(weight, "value", None),
         getattr(weight, "unit", None),
@@ -92,25 +132,18 @@ def weight_in_grams(weight, default=None) -> typing.Optional[int]:
     if native is not None:
         return native
 
-    if hasattr(weight, "G"):
-        grams = _decimal(weight.G)
-        if grams is not None:
-            return _round_decimal(grams)
-
     return weight_to_grams(weight, default=default)
-
 
 def dimension_in_mms(measurement, default=None) -> typing.Optional[int]:
     if measurement is None:
         return default
 
-    value = _decimal(getattr(measurement, "value", None))
-    unit = _unit_code(getattr(measurement, "unit", None))
-
-    # Prefer native value + unit to avoid float drift from computed properties.
-    if value is not None:
-        factor = _DIMENSION_FACTORS.get(unit, Decimal("1"))
-        return _round_decimal(value * factor)
+    native = dimension_to_mms(
+        getattr(measurement, "value", None),
+        getattr(measurement, "unit", None),
+    )
+    if native is not None:
+        return native
 
     if hasattr(measurement, "MM"):
         mms = _decimal(measurement.MM)
@@ -273,51 +306,142 @@ class ShippingService(lib.StrEnum):
 
 class ShippingOption(lib.Enum):
     """Royal Mail Click & Drop carrier options."""
-    rm_order_date = lib.OptionEnum("orderDate")
-    rm_shipping_cost_charged = lib.OptionEnum("shippingCharge")
-    rm_customs_duty_costs = lib.OptionEnum("customsDutyCosts")
-    rm_total = lib.OptionEnum("orderTotal")
 
-    rm_email_notification = lib.OptionEnum("receiveEmailNotification", bool)
-    rm_sms_notification = lib.OptionEnum("receiveSmsNotification", bool)
-    rm_request_signature_upon_delivery = lib.OptionEnum("requestSignatureUponDelivery", bool)
-    rm_is_local_collect = lib.OptionEnum("isLocalCollect", bool)
-    rm_safe_place = lib.OptionEnum("safePlace")
-    rm_department = lib.OptionEnum("department")
-    rm_airnumber = lib.OptionEnum("AIRNumber")
-    rm_iossnumber = lib.OptionEnum("IOSSNumber")
-    rm_requires_export_license = lib.OptionEnum("requiresExportLicense", bool)
-    rm_recipient_eori = lib.OptionEnum("recipientEoriNumber")
+    # order-level controls
+    order_reference = lib.OptionEnum("order_reference")
+    order_date = lib.OptionEnum("order_date")
+    planned_despatch_date = lib.OptionEnum("planned_despatch_date")
+    special_instructions = lib.OptionEnum("special_instructions")
+    service_code = lib.OptionEnum("service_code")
+    package_format_identifier = lib.OptionEnum("package_format_identifier")
 
-    rm_contains_dangerous_goods = lib.OptionEnum("containsDangerousGoods")
-    rm_dangerous_goods_un_code = lib.OptionEnum("dangerousGoodsUnCode")
-    rm_dangerous_goods_description = lib.OptionEnum("dangerousGoodsDescription")
-    rm_dangerous_goods_quantity = lib.OptionEnum("dangerousGoodsQuantity", int)
+    # order totals
+    subtotal = lib.OptionEnum("subtotal", float)
+    shipping_cost_charged = lib.OptionEnum("shipping_cost_charged", float)
+    other_costs = lib.OptionEnum("other_costs", float)
+    customs_duty_costs = lib.OptionEnum("customs_duty_costs", float)
+    order_tax = lib.OptionEnum("order_tax", float)
+    total = lib.OptionEnum("total", float)
+    currency = lib.OptionEnum("currency")
 
-    rm_importer_vat_number = lib.OptionEnum("importerVATNumber")
-    rm_importer_eori_number = lib.OptionEnum("importerEORINumber")
-    rm_importer_tax_code = lib.OptionEnum("importerTaxCode")
+    # related objects
+    address_book_reference = lib.OptionEnum("address_book_reference")
+    billing = lib.OptionEnum("billing")
+    importer = lib.OptionEnum("importer")
+    tags = lib.OptionEnum("tags", list)
 
-    """ Unified Options type mapping """
-    shipment_date = rm_order_date
-    signature_confirmation = rm_request_signature_upon_delivery
-    dangerous_goods = rm_contains_dangerous_goods
+    # postage details
+    send_notifications_to = lib.OptionEnum("send_notifications_to")
+    carrier_name = lib.OptionEnum("carrier_name")
+    service_register_code = lib.OptionEnum("service_register_code")
+    consequential_loss = lib.OptionEnum("consequential_loss", int)
+    receive_email_notification = lib.OptionEnum("receive_email_notification", bool)
+    receive_sms_notification = lib.OptionEnum("receive_sms_notification", bool)
+    request_signature_upon_delivery = lib.OptionEnum(
+        "request_signature_upon_delivery",
+        bool,
+    )
+    is_local_collect = lib.OptionEnum("is_local_collect", bool)
+    safe_place = lib.OptionEnum("safe_place")
+    department = lib.OptionEnum("department")
+    air_number = lib.OptionEnum("air_number")
+    ioss_number = lib.OptionEnum("ioss_number")
+    requires_export_license = lib.OptionEnum("requires_export_license", bool)
+    commercial_invoice_number = lib.OptionEnum("commercial_invoice_number")
+    commercial_invoice_date = lib.OptionEnum("commercial_invoice_date")
+    recipient_eori_number = lib.OptionEnum("recipient_eori_number")
+
+    # label flags
+    include_label_in_response = lib.OptionEnum("include_label_in_response", bool)
+    include_cn = lib.OptionEnum("include_cn", bool)
+    include_returns_label = lib.OptionEnum("include_returns_label", bool)
+
+    # dangerous goods
+    contains_dangerous_goods = lib.OptionEnum("contains_dangerous_goods", bool)
+    dangerous_goods_un_code = lib.OptionEnum("dangerous_goods_un_code")
+    dangerous_goods_description = lib.OptionEnum("dangerous_goods_description")
+    dangerous_goods_quantity = lib.OptionEnum("dangerous_goods_quantity", int)
+
+    # importer fallbacks
+    importer_vat_number = lib.OptionEnum("importer_vat_number")
+    importer_eori_number = lib.OptionEnum("importer_eori_number")
+    importer_tax_code = lib.OptionEnum("importer_tax_code")
+
+    # unified Karrio aliases
+    shipment_date = order_date
+    signature_confirmation = request_signature_upon_delivery
+    dangerous_goods = contains_dangerous_goods
+
+OPTION_ALIASES = {
+    # legacy / RM-style input keys
+    "orderDate": "order_date",
+    "shippingCharge": "shipping_cost_charged",
+    "customsDutyCosts": "customs_duty_costs",
+    "orderTotal": "total",
+    "receiveEmailNotification": "receive_email_notification",
+    "receiveSmsNotification": "receive_sms_notification",
+    "requestSignatureUponDelivery": "request_signature_upon_delivery",
+    "isLocalCollect": "is_local_collect",
+    "safePlace": "safe_place",
+    "AIRNumber": "air_number",
+    "IOSSNumber": "ioss_number",
+    "requiresExportLicense": "requires_export_license",
+    "recipientEoriNumber": "recipient_eori_number",
+    "includeCN": "include_cn",
+    "includeReturnsLabel": "include_returns_label",
+    "containsDangerousGoods": "contains_dangerous_goods",
+    "dangerousGoodsUnCode": "dangerous_goods_un_code",
+    "dangerousGoodsDescription": "dangerous_goods_description",
+    "dangerousGoodsQuantity": "dangerous_goods_quantity",
+
+    # current connector-specific legacy names
+    "rm_order_date": "order_date",
+    "rm_shipping_cost_charged": "shipping_cost_charged",
+    "rm_customs_duty_costs": "customs_duty_costs",
+    "rm_order_tax": "order_tax",
+    "rm_total": "total",
+    "rm_email_notification": "receive_email_notification",
+    "rm_sms_notification": "receive_sms_notification",
+    "rm_request_signature_upon_delivery": "request_signature_upon_delivery",
+    "rm_is_local_collect": "is_local_collect",
+    "rm_safe_place": "safe_place",
+    "rm_department": "department",
+    "rm_airnumber": "air_number",
+    "rm_iossnumber": "ioss_number",
+    "rm_requires_export_license": "requires_export_license",
+    "rm_recipient_eori": "recipient_eori_number",
+    "rm_contains_dangerous_goods": "contains_dangerous_goods",
+    "rm_dangerous_goods_un_code": "dangerous_goods_un_code",
+    "rm_dangerous_goods_description": "dangerous_goods_description",
+    "rm_dangerous_goods_quantity": "dangerous_goods_quantity",
+    "rm_importer_vat_number": "importer_vat_number",
+    "rm_importer_eori_number": "importer_eori_number",
+    "rm_importer_tax_code": "importer_tax_code",
+}
 
 def shipping_options_initializer(
     options: dict,
     package_options: units.ShippingOptions = None,
 ) -> units.ShippingOptions:
     """Apply default values to the given options."""
-    options = dict(options or {})
+    resolved = dict(package_options.content if package_options is not None else {})
+    resolved.update(options or {})
 
     if package_options is not None:
-        options.update(package_options.content)
+        resolved.update(package_options.content)
+
+    for legacy_key, canonical_key in OPTION_ALIASES.items():
+        if legacy_key in resolved and canonical_key not in resolved:
+            resolved[canonical_key] = resolved[legacy_key]
 
     def items_filter(key: str) -> bool:
-        return key in ShippingOption # type: ignore
+        return key in ShippingOption  # type: ignore
 
-    return units.ShippingOptions(options, ShippingOption, items_filter=items_filter)
-
+    return units.ShippingOptions(
+        resolved,
+        ShippingOption,
+        items_filter=items_filter,
+    )
 
 def load_services_from_csv() -> list:
     csv_path = pathlib.Path(__file__).resolve().parent / "services.csv"
@@ -444,41 +568,32 @@ def is_return_service(service: typing.Optional[str]) -> bool:
     return resolved in RETURN_SERVICE_CODES if resolved else False
 
 
-def _grams(weight) -> typing.Optional[int]:
-    if weight is None:
-        return None
 
-    if hasattr(weight, "G"):
-        return int(round(weight.G))
+def build_dimensions(package, dimension_type, raw_package=None):
+    raw_dimension_unit = _source_value(raw_package, "dimension_unit", "dimensionUnit")
 
-    if hasattr(weight, "value"):
-        return int(round(float(weight.value)))
+    height_in_mms = (
+        dimension_to_mms(_source_value(raw_package, "height"), raw_dimension_unit)
+        if raw_dimension_unit is not None
+        else None
+    )
+    width_in_mms = (
+        dimension_to_mms(_source_value(raw_package, "width"), raw_dimension_unit)
+        if raw_dimension_unit is not None
+        else None
+    )
+    depth_in_mms = (
+        dimension_to_mms(_source_value(raw_package, "length"), raw_dimension_unit)
+        if raw_dimension_unit is not None
+        else None
+    )
 
-    try:
-        return int(round(float(weight)))
-    except Exception:
-        return None
-
-
-def _mms(measurement) -> typing.Optional[int]:
-    if measurement is None:
-        return None
-
-    if hasattr(measurement, "MM"):
-        return int(round(measurement.MM))
-
-    if hasattr(measurement, "value"):
-        return int(round(float(measurement.value)))
-
-    try:
-        return int(round(float(measurement)))
-    except Exception:
-        return None
-
-def build_dimensions(package, dimension_type):
-    height_in_mms = dimension_in_mms(package.height)
-    width_in_mms = dimension_in_mms(package.width)
-    depth_in_mms = dimension_in_mms(package.length)
+    if height_in_mms is None and package is not None:
+        height_in_mms = dimension_in_mms(getattr(package, "height", None))
+    if width_in_mms is None and package is not None:
+        width_in_mms = dimension_in_mms(getattr(package, "width", None))
+    if depth_in_mms is None and package is not None:
+        depth_in_mms = dimension_in_mms(getattr(package, "length", None))
 
     if not all(value is not None for value in [height_in_mms, width_in_mms, depth_in_mms]):
         return None
@@ -489,9 +604,9 @@ def build_dimensions(package, dimension_type):
         depthInMms=depth_in_mms,
     )
 
-
 def resolve_package_format(
     package=None,
+    raw_package=None,
     explicit: typing.Optional[str] = None,
 ) -> str:
     """
@@ -499,9 +614,11 @@ def resolve_package_format(
 
     Priority:
     1. Explicit option override
-    2. Package packaging_type alias mapping
-    3. Inference from dimensions/weight
-    4. Fallback to smallParcel
+    2. Raw package packaging_type alias mapping
+    3. Normalized package packaging_type alias mapping
+    4. Inference from raw dimensions/weight
+    5. Fallback to normalized dimensions/weight
+    6. Fallback to smallParcel
 
     If explicit is an unknown string, it is passed through to support
     ChannelShipper custom package format identifiers.
@@ -510,17 +627,53 @@ def resolve_package_format(
         mapped = PackagingType.map(explicit).value_or_key
         return mapped if mapped is not None else str(explicit)
 
+    raw_packaging_type = _source_value(raw_package, "packaging_type", "packagingType")
+    if raw_packaging_type:
+        mapped = PackagingType.map(raw_packaging_type).value_or_key
+        if mapped is not None:
+            return mapped
+
     if package is not None and getattr(package, "packaging_type", None):
         mapped = PackagingType.map(package.packaging_type).value_or_key
         if mapped is not None:
             return mapped
 
-    weight_g = weight_in_grams(getattr(package, "weight", None)) if package is not None else None
-    dims = [
-        dimension_in_mms(getattr(package, "length", None)) if package is not None else None,
-        dimension_in_mms(getattr(package, "width", None)) if package is not None else None,
-        dimension_in_mms(getattr(package, "height", None)) if package is not None else None,
-    ]
+    raw_weight = _source_value(raw_package, "weight")
+    raw_weight_unit = _source_value(raw_package, "weight_unit", "weightUnit") or "G"
+    raw_dimension_unit = _source_value(raw_package, "dimension_unit", "dimensionUnit")
+
+    weight_g = (
+        weight_to_grams(raw_weight, raw_weight_unit)
+        if raw_weight is not None
+        else None
+    )
+    if weight_g is None and package is not None:
+        weight_g = weight_in_grams(getattr(package, "weight", None))
+
+    length_mm = (
+        dimension_to_mms(_source_value(raw_package, "length"), raw_dimension_unit)
+        if raw_dimension_unit is not None
+        else None
+    )
+    width_mm = (
+        dimension_to_mms(_source_value(raw_package, "width"), raw_dimension_unit)
+        if raw_dimension_unit is not None
+        else None
+    )
+    height_mm = (
+        dimension_to_mms(_source_value(raw_package, "height"), raw_dimension_unit)
+        if raw_dimension_unit is not None
+        else None
+    )
+
+    if length_mm is None and package is not None:
+        length_mm = dimension_in_mms(getattr(package, "length", None))
+    if width_mm is None and package is not None:
+        width_mm = dimension_in_mms(getattr(package, "width", None))
+    if height_mm is None and package is not None:
+        height_mm = dimension_in_mms(getattr(package, "height", None))
+
+    dims = [length_mm, width_mm, height_mm]
     dims = [d for d in dims if d is not None]
 
     if len(dims) == 3:
@@ -557,10 +710,17 @@ def resolve_package_format(
 
 def resolve_customs_category(category):
     mapping = {
+        "none": "none",
         "documents": "documents",
         "gift": "gift",
         "merchandise": "saleOfGoods",
+        "sale_of_goods": "saleOfGoods",
+        "commercial_sample": "commercialSample",
+        "sample": "commercialSample",
         "return_merchandise": "returnedGoods",
+        "returned_goods": "returnedGoods",
+        "mixed_content": "mixedContent",
+        "mixed": "mixedContent",
         "other": "other",
     }
 

@@ -8,22 +8,17 @@ import karrio.schemas.royalmail_clickdrop.order_status_request as status_req
 import karrio.schemas.royalmail_clickdrop.order_status_response as status_res
 import karrio.providers.royalmail_clickdrop.utils as provider_utils
 
-
-def _get(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default) if obj is not None else default
-
-
 def _normalize_item(item: typing.Any) -> dict:
     result = {
-        "orderIdentifier": _get(item, "orderIdentifier") or _get(item, "order_identifier"),
-        "orderReference": _get(item, "orderReference") or _get(item, "order_reference"),
-        "status": _get(item, "status"),
-        "trackingNumber": _get(item, "trackingNumber") or _get(item, "tracking_number"),
-        "despatchDate": _get(item, "despatchDate") or _get(item, "despatch_date"),
-        "shippingCarrier": _get(item, "shippingCarrier") or _get(item, "shipping_carrier"),
-        "shippingService": _get(item, "shippingService") or _get(item, "shipping_service"),
+        "orderIdentifier": provider_utils.get_value(item, "orderIdentifier") or provider_utils.get_value(item, "order_identifier"),
+        "orderReference": provider_utils.get_value(item, "orderReference") or provider_utils.get_value(item, "order_reference"),
+        "status": provider_utils.get_value(item, "status"),
+        "trackingNumber": provider_utils.get_value(item, "trackingNumber") or provider_utils.get_value(item, "tracking_number"),
+        "despatchDate": provider_utils.to_datetime_string(
+            provider_utils.get_value(item, "despatchDate") or provider_utils.get_value(item, "despatch_date")
+        ),
+        "shippingCarrier": provider_utils.get_value(item, "shippingCarrier") or provider_utils.get_value(item, "shipping_carrier"),
+        "shippingService": provider_utils.get_value(item, "shippingService") or provider_utils.get_value(item, "shipping_service"),
     }
     return {k: v for k, v in result.items() if v is not None}
 
@@ -54,7 +49,7 @@ def _validate_item(item: dict) -> None:
             )
 
 def order_status_request(payload, settings: provider_utils.Settings) -> lib.Serializable:
-    items = _get(payload, "items", []) or []
+    items = provider_utils.get_value(payload, "items", []) or []
 
     if len(items) == 0:
         raise ValueError(

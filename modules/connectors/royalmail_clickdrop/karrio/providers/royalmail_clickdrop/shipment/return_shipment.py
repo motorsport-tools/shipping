@@ -16,13 +16,6 @@ except ImportError:  # pragma: no cover
     pycountry = None
 
 
-def _get(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-
-    return getattr(obj, name, default) if obj is not None else default
-
-
 def _split_name(name: str) -> typing.Tuple[str, str]:
     if not name:
         return "", ""
@@ -35,8 +28,8 @@ def _split_name(name: str) -> typing.Tuple[str, str]:
 
 
 def _resolve_country_name(address) -> str:
-    country_name = _get(address, "country_name")
-    country_code = _get(address, "country_code")
+    country_name = provider_utils.get_value(address, "country_name")
+    country_code = provider_utils.get_value(address, "country_code")
 
     if country_name:
         return country_name
@@ -73,23 +66,41 @@ def parse_return_shipment_response(
     settings: provider_utils.Settings,
 ) -> typing.Tuple[typing.Optional[models.ShipmentDetails], typing.List[models.Message]]:
     response = _response.deserialize()
-    messages = error.parse_error_response(response, settings)
-
+    messages = error.parse_error_response(
+        response,
+        settings,
+        context="order",
+        operation="create_return_shipment",
+    )
     if any(messages):
         return None, messages
 
     data = lib.to_object(royalmail_return_res.ReturnResponseType, response)
 
     if data.shipment is None:
-        return None, []
+        return None, [
+            models.Message(
+                carrier_id=settings.carrier_id,
+                carrier_name=settings.carrier_name,
+                code="return_shipment_error",
+                message="Unable to parse return shipment response",
+                details={"operation": "create_return_shipment"},
+            )
+        ]
+
+    tracking_number = provider_utils.resolve_tracking_number(
+        data.shipment.trackingNumber,
+    )
 
     return (
         models.ShipmentDetails(
             carrier_id=settings.carrier_id,
             carrier_name=settings.carrier_name,
-            tracking_number=data.shipment.trackingNumber,
+            tracking_number=tracking_number,
             shipment_identifier=str(
-                data.shipment.uniqueItemId or data.shipment.trackingNumber or ""
+                data.shipment.uniqueItemId
+                or data.shipment.trackingNumber
+                or ""
             ),
             label_type=settings.label_type,
             docs=(
@@ -102,6 +113,10 @@ def parse_return_shipment_response(
                 for key, value in {
                     "qr_code": data.qrCode,
                     "is_return": True,
+                    "unique_item_id": data.shipment.uniqueItemId,
+                    "tracking_number_provided": (
+                        tracking_number != provider_utils.NO_TRACKING_NUMBER
+                    ),
                 }.items()
                 if value is not None
             },

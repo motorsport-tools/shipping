@@ -1,6 +1,5 @@
 """Karrio Royal Mail Click and Drop order and diagnostics query helpers."""
 
-import datetime
 import typing
 
 import karrio.core.models as models
@@ -13,30 +12,6 @@ import karrio.schemas.royalmail_clickdrop.orders_details_response as orders_deta
 import karrio.schemas.royalmail_clickdrop.orders_response as orders_res
 import karrio.schemas.royalmail_clickdrop.return_services_response as return_services_res
 import karrio.schemas.royalmail_clickdrop.version_response as version_res
-
-
-def _get(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-
-    return getattr(obj, name, default) if obj is not None else default
-
-
-def _to_datetime_string(value):
-    if value is None:
-        return None
-
-    if isinstance(value, datetime.datetime):
-        return value.isoformat()
-
-    if isinstance(value, datetime.date):
-        return datetime.datetime.combine(
-            value,
-            datetime.time.min,
-            tzinfo=datetime.timezone.utc,
-        ).isoformat()
-
-    return value
 
 
 def empty_request(
@@ -53,11 +28,11 @@ def order_lookup_request(
     order_identifiers = (
         payload
         if isinstance(payload, (str, int, list, tuple, set))
-        else _get(payload, "order_identifiers")
-        or _get(payload, "orderIdentifiers")
-        or _get(payload, "shipment_identifier")
-        or _get(payload, "shipmentIdentifier")
-        or _get(payload, "reference")
+        else provider_utils.get_value(payload, "order_identifiers")
+        or provider_utils.get_value(payload, "orderIdentifiers")
+        or provider_utils.get_value(payload, "shipment_identifier")
+        or provider_utils.get_value(payload, "shipmentIdentifier")
+        or provider_utils.get_value(payload, "reference")
     )
 
     resolved_order_identifiers = provider_utils.make_order_identifiers(order_identifiers)
@@ -78,20 +53,20 @@ def orders_lookup_request(
     payload: typing.Any,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
-    page_size = _get(payload, "page_size") or _get(payload, "pageSize")
+    page_size = provider_utils.get_value(payload, "page_size") or provider_utils.get_value(payload, "pageSize")
     start_date_time = (
-        _get(payload, "start_date_time")
-        or _get(payload, "startDateTime")
-        or _get(payload, "start_datetime")
+        provider_utils.get_value(payload, "start_date_time")
+        or provider_utils.get_value(payload, "startDateTime")
+        or provider_utils.get_value(payload, "start_datetime")
     )
     end_date_time = (
-        _get(payload, "end_date_time")
-        or _get(payload, "endDateTime")
-        or _get(payload, "end_datetime")
+        provider_utils.get_value(payload, "end_date_time")
+        or provider_utils.get_value(payload, "endDateTime")
+        or provider_utils.get_value(payload, "end_datetime")
     )
     continuation_token = (
-        _get(payload, "continuation_token")
-        or _get(payload, "continuationToken")
+        provider_utils.get_value(payload, "continuation_token")
+        or provider_utils.get_value(payload, "continuationToken")
     )
 
     if page_size is not None:
@@ -101,8 +76,8 @@ def orders_lookup_request(
 
     request = {
         "pageSize": page_size,
-        "startDateTime": _to_datetime_string(start_date_time),
-        "endDateTime": _to_datetime_string(end_date_time),
+        "startDateTime": provider_utils.to_datetime_string(start_date_time),
+        "endDateTime": provider_utils.to_datetime_string(end_date_time),
         "continuationToken": continuation_token,
     }
 

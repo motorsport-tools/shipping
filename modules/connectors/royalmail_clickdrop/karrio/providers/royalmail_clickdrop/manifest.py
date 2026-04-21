@@ -12,13 +12,6 @@ import karrio.schemas.royalmail_clickdrop.manifest_request as manifest_req
 import karrio.schemas.royalmail_clickdrop.manifest_response as manifest_res
 
 
-def _get(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-
-    return getattr(obj, name, default) if obj is not None else default
-
-
 def _normalize_status(status: typing.Optional[str], has_document: bool) -> str:
     if status:
         return status.strip().lower().replace(" ", "_")
@@ -103,12 +96,18 @@ def manifest_request(
         or settings.shipping_carrier_name
     )
 
+    # Royal Mail Click & Drop manifest creation is account-level for eligible
+    # orders and the API schema only accepts `carrierName` for this request.
+    #
+    # Karrio's generic ManifestRequest may include `shipment_identifiers`,
+    # but Royal Mail does not support targeting specific shipments here.
+    # We therefore ignore those generic identifiers instead of raising,
+    # and send only the fields defined by the carrier API.
     request = manifest_req.ManifestRequestType(
         carrierName=carrier_name,
     )
 
     return lib.Serializable(request, lib.to_dict)
-
 
 def manifest_identifier_request(
     payload: typing.Any,
@@ -117,11 +116,11 @@ def manifest_identifier_request(
     manifest_identifier = (
         payload
         if isinstance(payload, (str, int))
-        else _get(payload, "manifest_identifier")
-        or _get(payload, "manifestIdentifier")
-        or _get(payload, "manifest_number")
-        or _get(payload, "manifestNumber")
-        or _get(payload, "reference")
+        else provider_utils.get_value(payload, "manifest_identifier")
+        or provider_utils.get_value(payload, "manifestIdentifier")
+        or provider_utils.get_value(payload, "manifest_number")
+        or provider_utils.get_value(payload, "manifestNumber")
+        or provider_utils.get_value(payload, "reference")
     )
 
     if manifest_identifier in [None, ""]:

@@ -55,18 +55,25 @@ def _parse_generic_error_dict(
 
     data = lib.to_object(generic_error.ErrorResponseType, response)
 
+    # Generic endpoint errors do not usually include order-level identifiers,
+    # so we start with parser context from kwargs, such as
+    # `operation="create_return_shipment"`.
+    details = {**kwargs}
+
+    # Preserve the carrier-provided top-level `details` field when present.
+    # Royal Mail uses this for extra diagnostic text on some endpoints,
+    # including return shipment creation errors.
+    if data.details not in [None, "", [], {}]:
+        details["details"] = data.details
+
     return [
         _message(
             settings,
             code=data.code or "error",
             message=data.message or response.get("description") or "",
-            details={
-                **kwargs,
-                "details": data.details,
-            },
+            details=details,
         )
     ]
-
 
 def _parse_order_error_item(
     item: dict,
@@ -219,7 +226,12 @@ def _parse_failed_orders(
                 if item.get("errorCode") is not None
                 else item.get("code") or "error"
             )
-            base_message = item.get("errorMessage") or item.get("message") or ""
+            base_message = (
+                item.get("errorMessage")
+                or item.get("message")
+                or item.get("description")
+                or ""
+            )
             messages.append(
                 _message(
                     settings,

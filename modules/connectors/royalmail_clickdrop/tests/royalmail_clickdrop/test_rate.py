@@ -1,8 +1,9 @@
+ 
 """Royal Mail Click and Drop carrier rating tests."""
 
 import unittest
 
-from .fixture import gateway
+from . import fixture
 import karrio.sdk as karrio
 import karrio.lib as lib
 import karrio.core.models as models
@@ -11,17 +12,19 @@ import karrio.core.models as models
 class TestRoyalMailClickandDropRating(unittest.TestCase):
     def setUp(self):
         self.maxDiff = None
-        self.RateRequest = models.RateRequest(**RatePayload)
+        self.RateRequest = models.RateRequest(**fixture.RatePayload)
 
     def test_create_rate_request(self):
-        request = gateway.mapper.create_rate_request(self.RateRequest)
+        """Keep rate request serialization aligned with the universal Karrio rating payload."""
+        request = fixture.gateway.mapper.create_rate_request(self.RateRequest)
         expected = lib.to_dict(self.RateRequest)
 
         print(f"Generated request: {lib.to_dict(request.serialize())}")
         self.assertEqual(lib.to_dict(request.serialize()), expected)
 
     def test_get_rates(self):
-        response = karrio.Rating.fetch(self.RateRequest).from_(gateway).parse()
+        """Verify local rate-table lookup returns at least one rate and no messages for a valid shipment."""
+        response = karrio.Rating.fetch(self.RateRequest).from_(fixture.gateway).parse()
         rates, messages = lib.to_dict(response)
 
         print(f"Local rating response count: {len(rates)}")
@@ -29,111 +32,24 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
         self.assertEqual(messages, [])
 
     def test_parse_rate_response(self):
-        parsed_response = gateway.mapper.parse_rate_response(
-            lib.Deserializable(RateResponse, lambda x: x)
+        """Parse the local Royal Mail rate response into Karrio rate details."""
+        parsed_response = fixture.gateway.mapper.parse_rate_response(
+            lib.Deserializable(fixture.RateResponse, lambda x: x)
         )
 
         print(f"Parsed response: {lib.to_dict(parsed_response)}")
-        self.assertListEqual(lib.to_dict(parsed_response), ParsedRateResponse)
+        self.assertListEqual(lib.to_dict(parsed_response), fixture.ParsedRateResponse)
 
     def test_parse_error_response(self):
-        parsed_response = gateway.mapper.parse_rate_response(
-            lib.Deserializable(ErrorResponse, lambda x: x)
+        """Normalize a no-match rate-table result into Karrio rate messages."""
+        parsed_response = fixture.gateway.mapper.parse_rate_response(
+            lib.Deserializable(fixture.RateErrorResponse, lambda x: x)
         )
 
         print(f"Error response: {lib.to_dict(parsed_response)}")
-        self.assertListEqual(lib.to_dict(parsed_response), ParsedErrorResponse)
+        self.assertListEqual(lib.to_dict(parsed_response), fixture.ParsedRateErrorResponse)
 
 
 if __name__ == "__main__":
     unittest.main()
 
-
-RatePayload = {
-    "shipper": {
-        "postal_code": "SW1A1AA",
-        "city": "London",
-        "country_code": "GB",
-        "address_line1": "123 Test Street",
-        "person_name": "Warehouse User",
-        "company_name": "Test Warehouse",
-    },
-    "recipient": {
-        "postal_code": "BT11AA",
-        "city": "Belfast",
-        "country_code": "GB",
-        "address_line1": "3 Import Road",
-        "person_name": "John Smith",
-        "company_name": "Example Ltd",
-    },
-    "parcels": [
-        {
-            "weight": 0.5,
-            "weight_unit": "KG",
-            "length": 25,
-            "width": 18,
-            "height": 5,
-            "dimension_unit": "CM",
-            "packaging_type": "small_box",
-        }
-    ],
-    "options": {
-        "currency": "GBP",
-    },
-}
-
-RateResponse = {
-    "rates": [
-        {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
-            "service": "tpn24_01",
-            "currency": "GBP",
-            "total_charge": 8.5,
-            "transit_days": 1,
-            "meta": {
-                "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
-                "rate_provider": "rate_table",
-            },
-        }
-    ],
-    "messages": [],
-}
-
-ErrorResponse = {
-    "rates": [],
-    "messages": [
-        {
-            "code": "rate_table_error",
-            "message": "No matching rate table entry found",
-        }
-    ],
-}
-
-ParsedRateResponse = [
-    [
-        {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
-            "service": "tpn24_01",
-            "currency": "GBP",
-            "total_charge": 8.5,
-            "transit_days": 1,
-            "meta": {
-                "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
-                "rate_provider": "rate_table",
-            },
-        }
-    ],
-    [],
-]
-
-ParsedErrorResponse = [
-    [],
-    [
-        {
-            "code": "rate_table_error",
-            "message": "No matching rate table entry found",
-        }
-    ],
-]

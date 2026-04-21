@@ -7,17 +7,11 @@ import karrio.providers.royalmail_clickdrop.error as error
 import karrio.providers.royalmail_clickdrop.utils as provider_utils
 
 
-def _get(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default) if obj is not None else default
-
-
 def label_request(payload, settings: provider_utils.Settings) -> lib.Serializable:
     order_identifiers = (
-        _get(payload, "order_identifiers")
-        or _get(payload, "shipment_identifier")
-        or _get(payload, "reference")
+        provider_utils.get_value(payload, "order_identifiers")
+        or provider_utils.get_value(payload, "shipment_identifier")
+        or provider_utils.get_value(payload, "reference")
     )
 
     resolved_order_identifiers = provider_utils.make_order_identifiers(order_identifiers)
@@ -28,9 +22,9 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
             "`order_identifiers`, `shipment_identifier`, or `reference`"
         )
 
-    document_type = _get(payload, "document_type", "postageLabel")
-    include_returns_label = _get(payload, "include_returns_label")
-    include_cn = _get(payload, "include_cn")
+    document_type = provider_utils.get_value(payload, "document_type", "postageLabel")
+    include_returns_label = provider_utils.get_value(payload, "include_returns_label")
+    include_cn = provider_utils.get_value(payload, "include_cn")
 
     if document_type == "postageLabel" and include_returns_label is None:
         include_returns_label = False
@@ -95,4 +89,16 @@ def parse_label_response(
         context="label",
         operation="get_label",
     )
-    return None, messages
+
+    if any(messages):
+        return None, messages
+
+    return None, [
+        models.Message(
+            carrier_id=settings.carrier_id,
+            carrier_name=settings.carrier_name,
+            code="label_error",
+            message="Unable to parse label response",
+            details={"operation": "get_label"},
+        )
+    ]

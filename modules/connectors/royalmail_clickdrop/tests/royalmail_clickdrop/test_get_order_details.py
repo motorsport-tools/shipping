@@ -1,3 +1,4 @@
+ 
 """Royal Mail Click and Drop carrier get order details helper tests."""
 
 import unittest
@@ -5,71 +6,75 @@ from unittest.mock import patch, ANY
 
 import karrio.lib as lib
 
-from .fixture import gateway
+from . import fixture
 
 
 class TestRoyalMailClickandDropGetOrderDetails(unittest.TestCase):
     def setUp(self):
         self.maxDiff = None
-        self.GetOrderDetailsRequest = GetOrderDetailsPayload
+        self.GetOrderDetailsRequest = fixture.GetOrderDetailsPayload
 
     def test_create_get_order_details_request(self):
-        request = gateway.mapper.create_get_order_details_request(
+        """Serialize an order-details lookup payload into Royal Mail orderIdentifiers format."""
+        request = fixture.gateway.mapper.create_get_order_details_request(
             self.GetOrderDetailsRequest
         )
 
         print(f"Generated request: {request.serialize()}")
-        self.assertEqual(request.serialize(), OrderLookupRequest)
+        self.assertEqual(request.serialize(), fixture.OrderLookupRequest)
 
     def test_get_order_details(self):
+        """Verify the proxy sends the detailed order lookup request to GET /orders/{orderIdentifiers}/full."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
             mock.return_value = "[]"
 
-            request = gateway.mapper.create_get_order_details_request(
+            request = fixture.gateway.mapper.create_get_order_details_request(
                 self.GetOrderDetailsRequest
             )
-            gateway.proxy.get_order_details(request)
+            fixture.gateway.proxy.get_order_details(request)
 
             print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
-                f"{gateway.settings.server_url}/orders/12345678/full",
+                f"{fixture.gateway.settings.server_url}/orders/12345678/full",
             )
 
     def test_parse_get_order_details_response(self):
+        """Parse a successful detailed order lookup response into the expected native order detail list."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
-            mock.return_value = GetOrderDetailsResponse
+            mock.return_value = fixture.GetOrderDetailsResponse
 
-            request = gateway.mapper.create_get_order_details_request(
+            request = fixture.gateway.mapper.create_get_order_details_request(
                 self.GetOrderDetailsRequest
             )
-            response = gateway.proxy.get_order_details(request)
+            response = fixture.gateway.proxy.get_order_details(request)
             parsed_response = list(
-                gateway.mapper.parse_get_order_details_response(response)
+                fixture.gateway.mapper.parse_get_order_details_response(response)
             )
 
             print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
-                ParsedGetOrderDetailsResponse,
+                fixture.ParsedGetOrderDetailsResponse,
             )
 
     def test_parse_error_response(self):
+        """Normalize Royal Mail detailed order lookup errors into Karrio message objects."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
-            mock.return_value = GetOrderDetailsErrorResponse
+            mock.return_value = fixture.GetOrderDetailsErrorResponse
 
-            request = gateway.mapper.create_get_order_details_request(
+            request = fixture.gateway.mapper.create_get_order_details_request(
                 self.GetOrderDetailsRequest
             )
-            response = gateway.proxy.get_order_details(request)
+            response = fixture.gateway.proxy.get_order_details(request)
             parsed_response = list(
-                gateway.mapper.parse_get_order_details_response(response)
+                fixture.gateway.mapper.parse_get_order_details_response(response)
             )
 
             print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
-                ParsedErrorResponse,
+                fixture.ParsedGetOrderDetailsErrorResponse,
             )
 
 
@@ -77,131 +82,3 @@ if __name__ == "__main__":
     unittest.main()
 
 
-GetOrderDetailsPayload = {
-    "order_identifiers": [12345678],
-}
-
-OrderLookupRequest = {
-    "orderIdentifiers": "12345678",
-}
-
-GetOrderDetailsResponse = """[
-  {
-    "orderIdentifier": 12345678,
-    "orderStatus": "new",
-    "createdOn": "2024-01-01T10:00:00Z",
-    "printedOn": "2024-01-01T10:01:00Z",
-    "shippedOn": null,
-    "postageAppliedOn": "2024-01-01T10:01:00Z",
-    "manifestedOn": null,
-    "orderDate": "2024-01-01T10:00:00Z",
-    "tradingName": "Test Warehouse",
-    "department": "Dispatch",
-    "orderReference": "ORDER-1001",
-    "subtotal": 25.0,
-    "shippingCostCharged": 3.5,
-    "total": 28.5,
-    "weightInGrams": 500,
-    "currencyCode": "GBP",
-    "shippingDetails": {
-      "shippingCost": 3.5,
-      "trackingNumber": "RM123456789GB",
-      "serviceCode": "TPN24",
-      "shippingService": "Royal Mail Tracked 24",
-      "shippingCarrier": "Royal Mail",
-      "packages": [
-        {
-          "packageNumber": 1,
-          "trackingNumber": "RM123456789GB"
-        }
-      ]
-    },
-    "shippingInfo": {
-      "firstName": "John",
-      "lastName": "Smith",
-      "companyName": "Example Ltd",
-      "addressLine1": "1 High Street",
-      "city": "London",
-      "postcode": "SW1A1AA",
-      "countryCode": "GB"
-    },
-    "billingInfo": {
-      "firstName": "John",
-      "lastName": "Smith",
-      "companyName": "Example Ltd",
-      "addressLine1": "1 High Street",
-      "city": "London",
-      "postcode": "SW1A1AA",
-      "countryCode": "GB"
-    },
-    "orderLines": [
-      {
-        "SKU": "SKU-1",
-        "name": "Blue T-Shirt",
-        "quantity": 2,
-        "unitValue": 12.5,
-        "lineTotal": 25.0,
-        "customsCode": 610910
-      }
-    ],
-    "tags": [
-      {
-        "key": "channel",
-        "value": "web"
-      }
-    ]
-  }
-]"""
-
-GetOrderDetailsErrorResponse = """[
-  {
-    "accountOrderNumber": 987,
-    "channelOrderReference": "WEB-123",
-    "code": "NotFound",
-    "message": "Order details not found"
-  }
-]"""
-
-ParsedGetOrderDetailsResponse = [
-    [
-        {
-            "orderIdentifier": 12345678,
-            "orderStatus": "new",
-            "createdOn": "2024-01-01T10:00:00Z",
-            "printedOn": "2024-01-01T10:01:00Z",
-            "postageAppliedOn": "2024-01-01T10:01:00Z",
-            "orderDate": "2024-01-01T10:00:00Z",
-            "tradingName": "Test Warehouse",
-            "department": "Dispatch",
-            "orderReference": "ORDER-1001",
-            "subtotal": 25.0,
-            "shippingCostCharged": 3.5,
-            "total": 28.5,
-            "weightInGrams": 500,
-            "currencyCode": "GBP",
-            "shippingDetails": ANY,
-            "shippingInfo": ANY,
-            "billingInfo": ANY,
-            "orderLines": ANY,
-            "tags": ANY,
-        }
-    ],
-    [],
-]
-
-ParsedErrorResponse = [
-    None,
-    [
-        {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
-            "code": "NotFound",
-            "message": "Order details not found",
-            "details": {
-                "operation": "get_order_details",
-                "account_order_number": 987,
-                "channel_order_reference": "WEB-123",
-            },
-        }
-    ],
-]
