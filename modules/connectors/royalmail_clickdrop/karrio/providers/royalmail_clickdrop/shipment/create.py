@@ -1,20 +1,16 @@
 """Karrio Royal Mail Click and Drop shipment API implementation."""
 
-
 import datetime
 import typing
 from decimal import Decimal
 
-import karrio.lib as lib
 import karrio.core.models as models
+import karrio.lib as lib
 import karrio.providers.royalmail_clickdrop.error as error
-import karrio.providers.royalmail_clickdrop.utils as provider_utils
 import karrio.providers.royalmail_clickdrop.units as provider_units
+import karrio.providers.royalmail_clickdrop.utils as provider_utils
 import karrio.schemas.royalmail_clickdrop.shipment_request as royalmail_clickdrop_req
 import karrio.schemas.royalmail_clickdrop.shipment_response as royalmail_clickdrop_res
-
-#used for debug
-#from karrio.server.core.logging import logger
 
 
 def _attr(obj, name, default=None):
@@ -29,9 +25,37 @@ def _coalesce(*values):
     return None
 
 
+def _text(value, max=None):
+    return lib.text(value, max=max) if value is not None else None
+
+
+def _first_present(*values):
+    for value in values:
+        if value not in [None, ""]:
+            return value
+
+    return None
+
+
+def _value(source, *keys, default=None):
+    for key in keys:
+        value = provider_utils.get_value(source, key)
+        if value not in [None, ""]:
+            return value
+
+    return default
+
+def _option_state(source, name):
+    option = getattr(source, name, None) if source is not None else None
+    return getattr(option, "state", None)
+
 def _is_northern_ireland(address) -> bool:
     postcode = (
-        (provider_utils.get_value(address, "postal_code") or provider_utils.get_value(address, "postcode") or "")
+        (
+            provider_utils.get_value(address, "postal_code")
+            or provider_utils.get_value(address, "postcode")
+            or ""
+        )
         .replace(" ", "")
         .upper()
     )
@@ -41,18 +65,11 @@ def _is_northern_ireland(address) -> bool:
 def _is_gb_to_northern_ireland(shipper, recipient) -> bool:
     return (
         (provider_utils.get_value(shipper, "country_code") or "").upper() == "GB"
-        and (provider_utils.get_value(recipient, "country_code") or "").upper() == "GB"
+        and (provider_utils.get_value(recipient, "country_code") or "").upper()
+        == "GB"
         and not _is_northern_ireland(shipper)
         and _is_northern_ireland(recipient)
     )
-
-def _to_int(value, default=None):
-    if value in [None, ""]:
-        return default
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
 
 
 def _to_float(value, default=None):
@@ -63,7 +80,8 @@ def _to_float(value, default=None):
     except (TypeError, ValueError):
         return default
 
-def _validate_billing_address(billing):
+
+def _validate_billing_address(billing, source_label="billing"):
     if not billing:
         return
 
@@ -72,7 +90,7 @@ def _validate_billing_address(billing):
 
     for field in ["addressLine1", "city", "countryCode"]:
         if provider_utils.get_value(address, field) in [None, ""]:
-            missing.append(f"options.billing.address.{field}")
+            missing.append(f"{source_label}.address.{field}")
 
     if missing:
         raise ValueError(
@@ -80,18 +98,195 @@ def _validate_billing_address(billing):
             f"Missing required billing field(s): {', '.join(missing)}"
         )
 
+
+def _resolve_billing(payload, raw_options):
+    option_billing = provider_utils.get_value(raw_options, "billing")
+    if option_billing:
+        _validate_billing_address(option_billing, "options.billing")
+        return option_billing
+
+    billing_address = getattr(payload, "billing_address", None)
+    if billing_address is None:
+        return None
+
+    billing = lib.to_address(billing_address)
+    resolved = {
+        "address": {
+            "fullName": billing.person_name,
+            "companyName": billing.company_name,
+            "addressLine1": billing.address_line1,
+            "addressLine2": billing.address_line2,
+            "addressLine3": billing.address_line3,
+            "city": billing.city,
+            "county": billing.state_code or billing.state_name,
+            "postcode": billing.postal_code,
+            "countryCode": billing.country_code,
+        },
+        "phoneNumber": billing.phone_number,
+        "emailAddress": billing.email,
+    }
+
+    _validate_billing_address(resolved, "billing_address")
+    return resolved
+
+
+def _build_billing_type(billing):
+    if billing is None:
+        return None
+
+    billing_address = provider_utils.get_value(billing, "address") or {}
+
+    return royalmail_clickdrop_req.BillingType(
+        address=royalmail_clickdrop_req.AddressType(
+            fullName=_text(
+                provider_utils.get_value(billing_address, "fullName"), max=210
+            ),
+            companyName=_text(
+                provider_utils.get_value(billing_address, "companyName"), max=100
+            ),
+            addressLine1=_text(
+                provider_utils.get_value(billing_address, "addressLine1"), max=100
+            ),
+            addressLine2=_text(
+                provider_utils.get_value(billing_address, "addressLine2"), max=100
+            ),
+            addressLine3=_text(
+                provider_utils.get_value(billing_address, "addressLine3"), max=100
+            ),
+            city=_text(provider_utils.get_value(billing_address, "city"), max=100),
+            county=_text(provider_utils.get_value(billing_address, "county"), max=100),
+            postcode=_text(
+                provider_utils.get_value(billing_address, "postcode"), max=20
+            ),
+            countryCode=_text(
+                provider_utils.get_value(billing_address, "countryCode"), max=3
+            ),
+        ),
+        phoneNumber=_text(provider_utils.get_value(billing, "phoneNumber"), max=25),
+        emailAddress=_text(
+            provider_utils.get_value(billing, "emailAddress"), max=254
+        ),
+    )
+
+
+def _has_importer_data(importer, options, customs=None) -> bool:
+    customs_options = getattr(customs, "options", None) if customs is not None else None
+
+    return any(
+        [
+            importer,
+            options.importer_vat_number.state,
+            options.importer_tax_code.state,
+            options.importer_eori_number.state,
+            _option_state(customs_options, "vat_registration_number"),
+            _option_state(customs_options, "eori_number"),
+        ]
+    )
+
+
+def _build_importer_type(importer, options, customs=None):
+    if not _has_importer_data(importer, options, customs):
+        return None
+
+    importer = importer or {}
+    customs_options = getattr(customs, "options", None) if customs is not None else None
+
+    return royalmail_clickdrop_req.ImporterType(
+        companyName=_text(
+            _value(importer, "companyName", "company_name"),
+            max=100,
+        ),
+        addressLine1=_text(
+            _value(importer, "addressLine1", "address_line1"),
+            max=100,
+        ),
+        addressLine2=_text(
+            _value(importer, "addressLine2", "address_line2"),
+            max=100,
+        ),
+        addressLine3=_text(
+            _value(importer, "addressLine3", "address_line3"),
+            max=100,
+        ),
+        city=_text(_value(importer, "city"), max=100),
+        postcode=_text(
+            _value(importer, "postcode", "postal_code"),
+            max=20,
+        ),
+        country=_text(
+            _value(importer, "country", "country_name"),
+            max=100,
+        ),
+        businessName=_text(
+            _value(importer, "businessName", "business_name"),
+            max=100,
+        ),
+        contactName=_text(
+            _value(importer, "contactName", "contact_name"),
+            max=100,
+        ),
+        phoneNumber=_text(
+            _value(importer, "phoneNumber", "phone_number"),
+            max=25,
+        ),
+        emailAddress=_text(
+            _value(importer, "emailAddress", "email"),
+            max=254,
+        ),
+        vatNumber=_text(
+            _value(
+                importer,
+                "vatNumber",
+                "vat_number",
+                default=_first_present(
+                    options.importer_vat_number.state,
+                    _option_state(customs_options, "vat_registration_number"),
+                ),
+            ),
+            max=15,
+        ),
+        taxCode=_text(
+            _value(
+                importer,
+                "taxCode",
+                "tax_code",
+                default=options.importer_tax_code.state,
+            ),
+            max=25,
+        ),
+        eoriNumber=_text(
+            _value(
+                importer,
+                "eoriNumber",
+                "eori_number",
+                default=_first_present(
+                    options.importer_eori_number.state,
+                    _option_state(customs_options, "eori_number"),
+                ),
+            ),
+            max=18,
+        ),
+    )
+
+
 def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
     metadata = provider_utils.get_value(item, "metadata", {}) or {}
     if not isinstance(metadata, dict):
         metadata = {}
 
-    # Shipment item weights arrive as raw payload values, not normalized
-    # package Weight objects. Convert the raw item weight directly using the
-    # provided unit so customs content weights remain stable and predictable.
-    item_weight_in_grams = provider_units.weight_to_grams(
-        provider_utils.get_value(item, "weight"),
-        provider_utils.get_value(item, "weight_unit") or "G",
-        default=0,
+    item_value = _to_float(
+        _coalesce(
+            provider_utils.get_value(item, "value_amount"),
+            provider_utils.get_value(item, "value"),
+        )
+    )
+
+    raw_item_weight = provider_utils.get_value(item, "weight")
+    raw_item_weight_unit = _value(item, "weight_unit", "weightUnit")
+    item_weight_in_grams = (
+        provider_units.weight_to_grams(raw_item_weight, raw_item_weight_unit)
+        if raw_item_weight is not None and raw_item_weight_unit is not None
+        else None
     )
 
     customs_category = (
@@ -103,30 +298,27 @@ def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
     )
 
     return royalmail_clickdrop_req.ContentType(
-        SKU=lib.text(provider_utils.get_value(item, "sku"), max=100),
-        name=lib.text(
+        SKU=_text(provider_utils.get_value(item, "sku"), max=100),
+        name=_text(
             provider_utils.get_value(item, "description")
             or provider_utils.get_value(item, "title")
             or provider_utils.get_value(item, "name"),
             max=800,
         ),
         quantity=int(float(provider_utils.get_value(item, "quantity", 1) or 1)),
-        unitValue=_to_float(
-            provider_utils.get_value(item, "value_amount") or provider_utils.get_value(item, "value"),
-            0.0,
-        ),
+        unitValue=item_value,
         unitWeightInGrams=item_weight_in_grams,
-        customsDescription=lib.text(
+        customsDescription=_text(
             provider_utils.get_value(item, "description")
             or provider_utils.get_value(item, "title")
             or provider_utils.get_value(item, "name"),
             max=50,
         ),
-        extendedCustomsDescription=lib.text(
+        extendedCustomsDescription=_text(
             provider_utils.get_value(item, "description"),
             max=300,
         ),
-        customsCode=lib.text(
+        customsCode=_text(
             "".join(
                 char
                 for char in str(provider_utils.get_value(item, "hs_code") or "")
@@ -134,20 +326,15 @@ def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
             ),
             max=10,
         ),
-        originCountryCode=provider_utils.get_value(item, "origin_country"),
+        originCountryCode=_text(provider_utils.get_value(item, "origin_country"), max=3),
         customsDeclarationCategory=customs_category,
         requiresExportLicence=_coalesce(
             metadata.get("requires_export_licence"),
             metadata.get("requires_export_license"),
         ),
-        stockLocation=lib.text(metadata.get("stock_location"), max=50),
+        stockLocation=_text(metadata.get("stock_location"), max=50),
         useOriginPreference=metadata.get("use_origin_preference"),
-
-        # Royal Mail's schema defines `supplementaryUnits` as a string, but
-        # Karrio/custom caller payloads may provide it as a number (for example
-        # `1`). Coerce it to a string before passing it into `lib.text(...)`
-        # so valid numeric inputs serialize correctly and do not raise.
-        supplementaryUnits=lib.text(
+        supplementaryUnits=_text(
             (
                 str(metadata.get("supplementary_units"))
                 if metadata.get("supplementary_units") not in [None, ""]
@@ -155,9 +342,70 @@ def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
             ),
             max=17,
         ),
+        licenseNumber=_text(metadata.get("license_number"), max=41),
+        certificateNumber=_text(metadata.get("certificate_number"), max=41),
+    )
 
-        licenseNumber=lib.text(metadata.get("license_number"), max=41),
-        certificateNumber=lib.text(metadata.get("certificate_number"), max=41),
+
+def _resolve_special_instructions(options):
+    return _text(
+        _first_present(
+            options.special_instructions.state,
+            options.shipment_note.state,
+            options.shipper_instructions.state,
+            options.recipient_instructions.state,
+        ),
+        max=500,
+    )
+
+
+def _resolve_package_items(package, raw_package, customs) -> typing.List[typing.Any]:
+    package_items = list(
+        provider_utils.get_value(raw_package, "items") or package.items or []
+    )
+
+    if any(package_items):
+        return package_items
+
+    return list(getattr(customs, "commodities", None) or []) if customs else []
+
+
+def _resolve_currency_code(
+    payload: models.ShipmentRequest,
+    packages,
+    raw_parcels,
+    customs,
+    options,
+    settings: provider_utils.Settings,
+):
+    payment = getattr(payload, "payment", None)
+    duty = getattr(customs, "duty", None) if customs else None
+
+    package_items = [
+        item
+        for index, package in enumerate(packages or [])
+        for item in _resolve_package_items(
+            package,
+            raw_parcels[index] if index < len(raw_parcels) else None,
+            customs,
+        )
+    ]
+    item_currency = next(
+        (
+            _value(item, "value_currency", "valueCurrency", "currencyCode", "currency")
+            for item in package_items
+            if _value(item, "value_currency", "valueCurrency", "currencyCode", "currency")
+            not in [None, ""]
+        ),
+        None,
+    )
+
+    return _first_present(
+        options.currency.state,
+        provider_utils.get_value(payment, "currency"),
+        provider_utils.get_value(duty, "currency"),
+        item_currency,
+        settings.default_currency,
     )
 
 
@@ -167,21 +415,21 @@ def _build_package(
     customs,
     explicit_package_format: typing.Optional[str] = None,
 ) -> royalmail_clickdrop_req.PackageType:
-    # Use the original request payload for weight serialization.
-    #
-    # Royal Mail expects integer gram values, and Karrio's normalized package
-    # objects can introduce unit defaults or rounding drift during conversion.
-    # Using the raw parcel payload keeps `weightInGrams` and item
-    # `unitWeightInGrams` stable and aligned with the request fixture.
     raw_weight = provider_utils.get_value(raw_package, "weight")
-    raw_weight_unit = provider_utils.get_value(raw_package, "weight_unit") or "G"
-    raw_items = provider_utils.get_value(raw_package, "items") or package.items or []
+    raw_weight_unit = _value(raw_package, "weight_unit", "weightUnit")
+    package_items = _resolve_package_items(package, raw_package, customs)
+
+    raw_weight_in_grams = (
+        provider_units.weight_to_grams(raw_weight, raw_weight_unit)
+        if raw_weight is not None and raw_weight_unit is not None
+        else None
+    )
 
     return royalmail_clickdrop_req.PackageType(
-        weightInGrams=provider_units.weight_to_grams(
-            raw_weight,
-            raw_weight_unit,
-            default=provider_units.weight_in_grams(package.weight, default=1),
+        weightInGrams=_coalesce(
+            raw_weight_in_grams,
+            provider_units.weight_in_grams(package.weight, default=1),
+            1,
         ),
         packageFormatIdentifier=provider_units.resolve_package_format(
             package=package,
@@ -193,21 +441,24 @@ def _build_package(
             royalmail_clickdrop_req.DimensionsType,
             raw_package=raw_package,
         ),
-        contents=[_build_item(item, customs) for item in raw_items],
+        contents=[_build_item(item, customs) for item in package_items],
     )
 
 
-def _sum_items_value(packages) -> float:
+def _sum_items_value(packages, raw_parcels=None, customs=None) -> float:
     total = Decimal("0.00")
 
-    for package in packages or []:
-        for item in (package.items or []):
+    for index, package in enumerate(packages or []):
+        raw_package = raw_parcels[index] if raw_parcels and index < len(raw_parcels) else None
+
+        for item in _resolve_package_items(package, raw_package, customs):
             qty = Decimal(str(_attr(item, "quantity", 1) or 1))
-            value = Decimal(str(_attr(item, "value_amount") or _attr(item, "value") or 0))
+            value = Decimal(
+                str(_coalesce(_attr(item, "value_amount"), _attr(item, "value"), 0))
+            )
             total += qty * value
 
     return float(total)
-
 
 def parse_shipment_response(
     _response: lib.Deserializable[dict],
@@ -220,11 +471,7 @@ def parse_shipment_response(
         context="order",
         operation="create_shipment",
     )
-    shipment = (
-        _extract_details(response, settings)
-        if isinstance(response, dict)
-        else None
-    )
+    shipment = _extract_details(response, settings) if isinstance(response, dict) else None
     messages += _extract_label_messages(response, settings)
 
     if shipment is None and any(messages):
@@ -293,6 +540,7 @@ def _extract_details(
         ),
     )
 
+
 def _extract_label_messages(
     data: dict,
     settings: provider_utils.Settings,
@@ -348,6 +596,7 @@ def shipment_request(
         initializer=provider_units.shipping_options_initializer,
     )
     raw_options = payload.options or {}
+    raw_parcels = list(payload.parcels or [])
 
     customs = (
         lib.to_customs_info(
@@ -359,33 +608,45 @@ def shipment_request(
         if payload.customs
         else None
     )
+    customs_options = getattr(customs, "options", None) if customs is not None else None
 
     selected_service = options.service_code.state or payload.service
-    service = provider_units.resolve_carrier_service(selected_service)
+    service_code = provider_units.resolve_carrier_service(selected_service)
+    service_register_code = (
+        options.service_register_code.state
+        or provider_units.resolve_service_register_code(selected_service)
+    )
 
-    if service is None:
+    if service_code is None:
         raise ValueError(
             f"Invalid Royal Mail Click & Drop service selector: {selected_service}"
         )
 
     explicit_package_format = options.package_format_identifier.state
-    order_reference = lib.text(
-        options.order_reference.state or payload.reference,
+    order_reference = _text(
+        _first_present(
+            options.order_reference.state,
+            payload.reference,
+            getattr(payload, "order_id", None),
+        ),
         max=40,
     )
 
-    # Royal Mail expects date-time strings for both fields.
     order_date = (
         provider_utils.to_datetime_string(options.order_date.state)
         or datetime.datetime.now(datetime.UTC).isoformat()
     )
     planned_despatch_date = provider_utils.to_datetime_string(
-        options.planned_despatch_date.state
+        _first_present(
+            options.planned_despatch_date.state,
+            options.shipment_date.state,
+            options.shipping_date.state,
+        )
     )
 
     subtotal = _coalesce(
         options.subtotal.state,
-        _sum_items_value(packages),
+        _sum_items_value(packages, raw_parcels, customs),
     )
     shipping_cost = _coalesce(options.shipping_cost_charged.state, 0.0)
     other_costs = options.other_costs.state
@@ -399,7 +660,14 @@ def shipment_request(
         + float(other_costs or 0.0)
         + float(customs_duty or 0.0),
     )
-    currency = options.currency.state or settings.default_currency
+    currency = _resolve_currency_code(
+        payload,
+        packages,
+        raw_parcels,
+        customs,
+        options,
+        settings,
+    )
 
     send_notifications_to = _coalesce(
         options.send_notifications_to.state,
@@ -409,29 +677,24 @@ def shipment_request(
         options.carrier_name.state,
         settings.shipping_carrier_name,
     )
-    commercial_invoice_number = _coalesce(
+    commercial_invoice_number = _first_present(
         options.commercial_invoice_number.state,
-        getattr(customs, "invoice_number", None),
+        options.invoice_number.state,
+        getattr(customs, "invoice", None),
     )
     commercial_invoice_date = provider_utils.to_datetime_string(
-        _coalesce(
+        _first_present(
             options.commercial_invoice_date.state,
+            options.invoice_date.state,
             getattr(customs, "invoice_date", None),
         )
     )
+    special_instructions = _resolve_special_instructions(options)
 
-    billing = provider_utils.get_value(raw_options, "billing")
-    billing_address = provider_utils.get_value(billing, "address") or {}
-    _validate_billing_address(billing)
-
+    billing = _resolve_billing(payload, raw_options)
     importer = provider_utils.get_value(raw_options, "importer")
     tags = provider_utils.get_value(raw_options, "tags")
-    raw_parcels = list(payload.parcels or [])
 
-
-    # YAML note:
-    # `isRecipientABusiness` is only relevant for GB -> NI B2B shipments.
-    # Never infer `True` from `recipient.residential is None`.
     is_recipient_a_business = None
     if (
         _is_gb_to_northern_ireland(shipper, recipient)
@@ -439,11 +702,6 @@ def shipment_request(
     ):
         is_recipient_a_business = not recipient.residential
 
-    # YAML note:
-    # - `includeLabelInResponse` is required in LabelGenerationRequest.
-    # - `includeCN` should be requested for all international shipments.
-    # - for domestic shipments, omit `includeCN` unless explicitly enabled.
-    # - `includeReturnsLabel` is optional; omit it when false/unset.
     is_international = (
         (shipper.country_code or "").upper()
         != (recipient.country_code or "").upper()
@@ -454,9 +712,7 @@ def shipment_request(
         True,
     )
     include_cn = (
-        True
-        if is_international
-        else (True if options.include_cn.state is True else None)
+        True if is_international else (True if options.include_cn.state is True else None)
     )
     include_returns_label = options.include_returns_label.state
     if include_returns_label is None:
@@ -473,46 +729,29 @@ def shipment_request(
                 isRecipientABusiness=is_recipient_a_business,
                 recipient=royalmail_clickdrop_req.BillingType(
                     address=royalmail_clickdrop_req.AddressType(
-                        fullName=lib.identity(
-                            recipient.person_name or recipient.company_name
+                        fullName=_text(
+                            recipient.person_name or recipient.company_name,
+                            max=210,
                         ),
-                        companyName=recipient.company_name,
-                        addressLine1=recipient.address_line1,
-                        addressLine2=recipient.address_line2,
-                        addressLine3=recipient.address_line3,
-                        city=recipient.city,
-                        county=recipient.state_code or recipient.state_name,
-                        postcode=recipient.postal_code,
-                        countryCode=recipient.country_code,
+                        companyName=_text(recipient.company_name, max=100),
+                        addressLine1=_text(recipient.address_line1, max=100),
+                        addressLine2=_text(recipient.address_line2, max=100),
+                        addressLine3=_text(recipient.address_line3, max=100),
+                        city=_text(recipient.city, max=100),
+                        county=_text(recipient.state_code or recipient.state_name, max=100),
+                        postcode=_text(recipient.postal_code, max=20),
+                        countryCode=_text(recipient.country_code, max=3),
                     ),
-                    phoneNumber=recipient.phone_number,
-                    emailAddress=recipient.email,
-                    addressBookReference=options.address_book_reference.state,
+                    phoneNumber=_text(recipient.phone_number, max=25),
+                    emailAddress=_text(recipient.email, max=254),
+                    addressBookReference=_text(options.address_book_reference.state, max=100),
                 ),
                 sender=royalmail_clickdrop_req.SenderType(
-                    tradingName=shipper.company_name or shipper.person_name,
-                    phoneNumber=shipper.phone_number,
-                    emailAddress=shipper.email,
-                                ),
-                billing=(
-                    royalmail_clickdrop_req.BillingType(
-                        address=royalmail_clickdrop_req.AddressType(
-                            fullName=provider_utils.get_value(billing_address, "fullName"),
-                            companyName=provider_utils.get_value(billing_address, "companyName"),
-                            addressLine1=provider_utils.get_value(billing_address, "addressLine1"),
-                            addressLine2=provider_utils.get_value(billing_address, "addressLine2"),
-                            addressLine3=provider_utils.get_value(billing_address, "addressLine3"),
-                            city=provider_utils.get_value(billing_address, "city"),
-                            county=provider_utils.get_value(billing_address, "county"),
-                            postcode=provider_utils.get_value(billing_address, "postcode"),
-                            countryCode=provider_utils.get_value(billing_address, "countryCode"),
-                        ),
-                        phoneNumber=provider_utils.get_value(billing, "phoneNumber"),
-                        emailAddress=provider_utils.get_value(billing, "emailAddress"),
-                    )
-                    if billing
-                    else None
+                    tradingName=_text(shipper.company_name or shipper.person_name, max=250),
+                    phoneNumber=_text(shipper.phone_number, max=25),
+                    emailAddress=_text(shipper.email, max=254),
                 ),
+                billing=_build_billing_type(billing),
                 packages=[
                     _build_package(
                         package,
@@ -524,10 +763,7 @@ def shipment_request(
                 ],
                 orderDate=order_date,
                 plannedDespatchDate=planned_despatch_date,
-                specialInstructions=lib.text(
-                    options.special_instructions.state,
-                    max=500,
-                ),
+                specialInstructions=special_instructions,
                 subtotal=_to_float(subtotal, 0.0),
                 shippingCostCharged=_to_float(shipping_cost, 0.0),
                 otherCosts=(
@@ -535,7 +771,6 @@ def shipment_request(
                     if other_costs is not None
                     else None
                 ),
-                # Royal Mail only supports customsDutyCosts for DDP services.
                 customsDutyCosts=(
                     _to_float(customs_duty)
                     if customs is not None
@@ -547,39 +782,57 @@ def shipment_request(
                 currencyCode=currency,
                 postageDetails=royalmail_clickdrop_req.PostageDetailsType(
                     sendNotificationsTo=send_notifications_to,
-                    serviceCode=service,
-                    carrierName=carrier_name,
-                    serviceRegisterCode=options.service_register_code.state,
+                    serviceCode=_text(service_code, max=10),
+                    carrierName=_text(carrier_name, max=50),
+                    serviceRegisterCode=_text(service_register_code, max=2),
                     consequentialLoss=options.consequential_loss.state,
                     receiveEmailNotification=_coalesce(
                         options.receive_email_notification.state,
+                        options.email_notification.state,
                         bool(recipient.email),
                     ),
                     receiveSmsNotification=_coalesce(
                         options.receive_sms_notification.state,
+                        options.sms_notification.state,
                         False,
                     ),
                     requestSignatureUponDelivery=options.request_signature_upon_delivery.state,
                     isLocalCollect=options.is_local_collect.state,
-                    safePlace=options.safe_place.state,
-                    department=options.department.state,
-                    # AIRNumber is only applicable for GB -> NI flows.
+                    safePlace=_text(options.safe_place.state, max=90),
+                    department=_text(options.department.state, max=150),
                     AIRNumber=(
-                        options.air_number.state
+                        _text(
+                            _first_present(
+                                options.air_number.state,
+                                _option_state(customs_options, "nip_number"),
+                            ),
+                            max=50,
+                        )
                         if _is_gb_to_northern_ireland(shipper, recipient)
                         else None
                     ),
-                    IOSSNumber=options.ioss_number.state,
+                    IOSSNumber=_text(
+                        _first_present(
+                            options.ioss_number.state,
+                            _option_state(customs_options, "ioss"),
+                        ),
+                        max=50,
+                    ),
                     requiresExportLicense=options.requires_export_license.state,
-                    commercialInvoiceNumber=commercial_invoice_number,
+                    commercialInvoiceNumber=_text(commercial_invoice_number, max=35),
                     commercialInvoiceDate=commercial_invoice_date,
-                    recipientEoriNumber=options.recipient_eori_number.state,
+                    recipientEoriNumber=_text(
+                        _first_present(
+                            options.recipient_eori_number.state,
+                            _option_state(customs_options, "eori_number"),
+                        )
+                    ),
                 ),
                 tags=(
                     [
                         royalmail_clickdrop_req.TagType(
-                            key=provider_utils.get_value(tag, "key"),
-                            value=provider_utils.get_value(tag, "value"),
+                            key=_text(provider_utils.get_value(tag, "key"), max=100),
+                            value=_text(provider_utils.get_value(tag, "value"), max=100),
                         )
                         for tag in tags
                     ]
@@ -592,50 +845,22 @@ def shipment_request(
                     includeReturnsLabel=include_returns_label,
                 ),
                 orderTax=_to_float(order_tax, 0.0),
-                containsDangerousGoods=options.contains_dangerous_goods.state,
-                dangerousGoodsUnCode=lib.text(
+                containsDangerousGoods=_coalesce(
+                    options.contains_dangerous_goods.state,
+                    options.dangerous_good.state,
+                ),
+                dangerousGoodsUnCode=_text(
                     options.dangerous_goods_un_code.state,
                     max=4,
                 ),
-                dangerousGoodsDescription=lib.text(
+                dangerousGoodsDescription=_text(
                     options.dangerous_goods_description.state,
                     max=500,
                 ),
                 dangerousGoodsQuantity=options.dangerous_goods_quantity.state,
                 importer=(
-                    royalmail_clickdrop_req.ImporterType(
-                        companyName=provider_utils.get_value(importer, "companyName")
-                        or provider_utils.get_value(importer, "company_name"),
-                        addressLine1=provider_utils.get_value(importer, "addressLine1")
-                        or provider_utils.get_value(importer, "address_line1"),
-                        addressLine2=provider_utils.get_value(importer, "addressLine2")
-                        or provider_utils.get_value(importer, "address_line2"),
-                        addressLine3=provider_utils.get_value(importer, "addressLine3")
-                        or provider_utils.get_value(importer, "address_line3"),
-                        city=provider_utils.get_value(importer, "city"),
-                        postcode=provider_utils.get_value(importer, "postcode")
-                        or provider_utils.get_value(importer, "postal_code"),
-                        country=provider_utils.get_value(importer, "country")
-                        or provider_utils.get_value(importer, "country_name"),
-                        businessName=provider_utils.get_value(importer, "businessName")
-                        or provider_utils.get_value(importer, "business_name"),
-                        contactName=provider_utils.get_value(importer, "contactName")
-                        or provider_utils.get_value(importer, "contact_name"),
-                        phoneNumber=provider_utils.get_value(importer, "phoneNumber")
-                        or provider_utils.get_value(importer, "phone_number"),
-                        emailAddress=provider_utils.get_value(importer, "emailAddress")
-                        or provider_utils.get_value(importer, "email"),
-                        vatNumber=provider_utils.get_value(importer, "vatNumber")
-                        or provider_utils.get_value(importer, "vat_number")
-                        or options.importer_vat_number.state,
-                        taxCode=provider_utils.get_value(importer, "taxCode")
-                        or provider_utils.get_value(importer, "tax_code")
-                        or options.importer_tax_code.state,
-                        eoriNumber=provider_utils.get_value(importer, "eoriNumber")
-                        or provider_utils.get_value(importer, "eori_number")
-                        or options.importer_eori_number.state,
-                    )
-                    if importer and is_international
+                    _build_importer_type(importer, options, customs)
+                    if is_international and _has_importer_data(importer, options, customs)
                     else None
                 ),
             )

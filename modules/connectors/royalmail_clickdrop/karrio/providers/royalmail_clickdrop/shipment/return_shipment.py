@@ -53,6 +53,15 @@ def _resolve_country_iso3(country_code: str) -> str:
 
     return code
 
+
+def _first_present(*values):
+    for value in values:
+        if value not in [None, ""]:
+            return value
+
+    return None
+
+
 def _build_return_address(address) -> royalmail_return_req.AddressType:
     first_name, last_name = _split_name(address.person_name)
 
@@ -77,6 +86,7 @@ def _build_return_address(address) -> royalmail_return_req.AddressType:
             or {}
         )
     )
+
 
 def parse_return_shipment_response(
     _response: lib.Deserializable[dict],
@@ -140,20 +150,24 @@ def parse_return_shipment_response(
         ),
         [],
     )
-    
+
 
 def return_shipment_request(
     payload: models.ShipmentRequest,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
     shipper = lib.to_address(payload.shipper)
-    recipient = lib.to_address(payload.recipient)
+    return_address = lib.to_address(payload.return_address or payload.recipient)
     options = lib.to_shipping_options(
         payload.options or {},
         initializer=provider_units.shipping_options_initializer,
     )
 
-    selected_service = options.service_code.state or payload.service or "tracked_returns_48"
+    selected_service = (
+        options.service_code.state
+        or payload.service
+        or "tracked_returns_48"
+    )
     service_code = provider_units.resolve_carrier_service(selected_service)
 
     if service_code is None:
@@ -167,18 +181,19 @@ def return_shipment_request(
             f"code. Got: {selected_service}"
         )
 
-    shipper_first_name, shipper_last_name = _split_name(shipper.person_name)
-    recipient_first_name, recipient_last_name = _split_name(recipient.person_name)
-
     request = royalmail_return_req.ReturnRequestType(
         service=royalmail_return_req.ServiceType(
             serviceCode=service_code,
         ),
         shipment=royalmail_return_req.ShipmentType(
             shippingAddress=_build_return_address(shipper),
-            returnAddress=_build_return_address(recipient),
+            returnAddress=_build_return_address(return_address),
             customerReference=royalmail_return_req.CustomerReferenceType(
-                reference=payload.reference or getattr(payload, "id", None),
+                reference=_first_present(
+                    payload.reference,
+                    getattr(payload, "order_id", None),
+                    getattr(payload, "id", None),
+                ),
             ),
         ),
     )

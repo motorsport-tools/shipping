@@ -57,6 +57,6 @@ Check the [Karrio Mutli-carrier SDK docs](https://docs.karrio.io) for Shipping A
 - `test_list_orders.py` — 4
 - `test_rate.py` — 4
 - `test_retry_manifest.py` — 4
-- `test_tracking.py` — 1
+- `test_tracking.py` — 5
 
 All test payloads are contained in fixtures.py with comments for the purpose of all tests

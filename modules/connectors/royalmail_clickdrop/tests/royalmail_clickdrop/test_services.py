@@ -24,7 +24,7 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         return serialized["items"][0]["packages"][0]["packageFormatIdentifier"]
 
     def test_services_catalog_loads(self):
-        """Load services from CSV and expose expected core Royal Mail service keys."""
+        """Load services from CSV and expose expected core Royal Mail service codes."""
         services = provider_units.DEFAULT_SERVICES or []
         self.assertGreater(len(services), 0)
 
@@ -45,13 +45,14 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             self.assertIn(code, codes)
 
     def test_resolve_carrier_service(self):
-        """Resolve CSV service keys, enum aliases, carrier codes, and unknown values correctly."""
+        """Resolve service aliases and direct service codes, but not raw register codes."""
         scenarios = [
-            ("tpn24_01", "TPN24"),
             ("tracked_24", "TPN24"),
             ("TPN24", "TPN24"),
             ("tracked_returns_48", "TSS"),
             ("TSS", "TSS"),
+            ("1", None),
+            ("01", None),
             ("not_a_service", None),
         ]
 
@@ -59,6 +60,23 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             with self.subTest(selector=selector):
                 self.assertEqual(
                     provider_units.resolve_carrier_service(selector),
+                    expected,
+                )
+
+    def test_resolve_service_register_code(self):
+        """Resolve serviceRegisterCode from the CSV service catalog."""
+        scenarios = [
+            ("tracked_24", fixture.ExpectedServiceRegisterCodes["TPN24"]),
+            ("TPN24", fixture.ExpectedServiceRegisterCodes["TPN24"]),
+            ("tracked_returns_48", fixture.ExpectedServiceRegisterCodes["TSS"]),
+            ("TSS", fixture.ExpectedServiceRegisterCodes["TSS"]),
+            ("not_a_service", None),
+        ]
+
+        for selector, expected in scenarios:
+            with self.subTest(selector=selector):
+                self.assertEqual(
+                    provider_units.resolve_service_register_code(selector),
                     expected,
                 )
 

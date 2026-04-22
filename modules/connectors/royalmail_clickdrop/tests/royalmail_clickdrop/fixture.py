@@ -307,6 +307,46 @@ ShipmentPayloadMissingBillingPostcode["options"]["billing"]["address"].pop("post
 
 ShipmentPayloadWithBilling = copy.deepcopy(ShipmentPayloadRichBase)
 
+ShipmentPayloadWithBillingAddress = copy.deepcopy(ShipmentPayloadWithoutBilling)
+ShipmentPayloadWithBillingAddress["billing_address"] = {
+    "person_name": "Billing Contact",
+    "company_name": "Example Ltd",
+    "address_line1": "2 Billing Street",
+    "city": "London",
+    "postal_code": "EC1A1AA",
+    "country_code": "GB",
+    "phone_number": "07111111111",
+    "email": "billing@example.com",
+}
+
+ShipmentPayloadWithOrderIdFallback = copy.deepcopy(ShipmentPayloadWithoutBilling)
+ShipmentPayloadWithOrderIdFallback["reference"] = ""
+ShipmentPayloadWithOrderIdFallback["order_id"] = "ORDER-ID-1001"
+ShipmentPayloadWithOrderIdFallback["options"].pop("order_reference", None)
+
+ShipmentPayloadWithCustomsInvoiceFallback = copy.deepcopy(ShipmentPayloadInternational)
+ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_number", None)
+ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_date", None)
+ShipmentPayloadWithCustomsInvoiceFallback["customs"] = {
+    "content_type": "merchandise",
+    "invoice": "INV-CUSTOMS-1001",
+    "invoice_date": "2024-01-03T10:00:00Z",
+}
+
+ShipmentPayloadWithImporterFallbacks = copy.deepcopy(ShipmentPayloadInternational)
+ShipmentPayloadWithImporterFallbacks["options"].pop("importer", None)
+ShipmentPayloadWithImporterFallbacks["options"]["importer_vat_number"] = "GB123456789"
+ShipmentPayloadWithImporterFallbacks["options"]["importer_tax_code"] = "TAX-GB-1001"
+ShipmentPayloadWithImporterFallbacks["options"]["importer_eori_number"] = "GB123456789000"
+
+ShipmentPayloadWithoutItemValueWeight = copy.deepcopy(ShipmentPayloadWithoutBilling)
+ShipmentPayloadWithoutItemValueWeight["parcels"][0]["items"] = [
+    {
+        "sku": "SKU-LOOKUP-1",
+        "quantity": 1,
+    }
+]
+
 
 ShipmentPayloadInvalidService = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInvalidService["service"] = "not_a_service"
@@ -574,6 +614,7 @@ ShipmentRequest = {
             "currencyCode": "GBP",
             "postageDetails": {
                 "serviceCode": "TPN24",
+                "serviceRegisterCode": "01",
                 "carrierName": "Royal Mail OBA",
                 "receiveEmailNotification": True,
                 "receiveSmsNotification": False,
@@ -584,6 +625,23 @@ ShipmentRequest = {
         }
     ]
 }
+
+ShipmentRequestWithBillingAddress = copy.deepcopy(ShipmentRequest)
+ShipmentRequestWithBillingAddress["items"][0]["billing"] = {
+    "address": {
+        "fullName": "Billing Contact",
+        "companyName": "Example Ltd",
+        "addressLine1": "2 Billing Street",
+        "city": "London",
+        "postcode": "EC1A1AA",
+        "countryCode": "GB",
+    },
+    "phoneNumber": "07111111111",
+    "emailAddress": "billing@example.com",
+}
+
+ShipmentRequestWithOrderIdFallback = copy.deepcopy(ShipmentRequest)
+ShipmentRequestWithOrderIdFallback["items"][0]["orderReference"] = "ORDER-ID-1001"
 
 ShipmentResponseCreatedOnly = {
     "successCount": 1,
@@ -1258,6 +1316,21 @@ ReturnShipmentPayloadESCountry = copy.deepcopy(ReturnShipmentPayload)
 ReturnShipmentPayloadESCountry["shipper"]["country_code"] = "ES"
 ReturnShipmentPayloadESCountry["recipient"]["country_code"] = "ES"
 
+ReturnShipmentPayloadWithReturnAddress = copy.deepcopy(ReturnShipmentPayload)
+ReturnShipmentPayloadWithReturnAddress["return_address"] = {
+    "address_line1": "9 Merchant Returns Lane",
+    "city": "Manchester",
+    "postal_code": "M11AE",
+    "country_code": "GB",
+    "state_code": "",
+    "person_name": "Returns Team",
+    "company_name": "Merchant Returns Hub",
+}
+
+ReturnShipmentPayloadWithOrderId = copy.deepcopy(ReturnShipmentPayload)
+ReturnShipmentPayloadWithOrderId["reference"] = ""
+ReturnShipmentPayloadWithOrderId["order_id"] = "ORDER-ID-RET-1001"
+
 ReturnShipmentRequest = {
     "service": {"serviceCode": "TSS"},
     "shipment": {
@@ -1371,8 +1444,12 @@ ParsedReturnShipmentErrorResponse = [
 # Service / settings expectations
 # ---------------------------------------------------------------------------
 
-ExpectedCoreServices = ["tpn24_01", "fe0_01"]
+ExpectedCoreServices = ["TPN24", "FE0"]
 ExpectedReturnServices = ["TSS"]
+ExpectedServiceRegisterCodes = {
+    "TPN24": "01",
+    "TSS": "01",
+}
 ExpectedDefaultConnectionConfig = {
     "base_url": "https://api.parcel.royalmail.com/api/v1",
     "label_type": "PDF",
@@ -1598,12 +1675,13 @@ RateResponse = {
         {
             "carrier_id": "royalmail_clickdrop",
             "carrier_name": "royalmail_clickdrop",
-            "service": "tpn24_01",
+            "service": "TPN24",
             "currency": "GBP",
             "total_charge": 8.5,
             "transit_days": 1,
             "meta": {
                 "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
+                "carrier_service_code": "01",
                 "rate_provider": "rate_table",
             },
         }
@@ -1621,12 +1699,13 @@ ParsedRateResponse = [
         {
             "carrier_id": "royalmail_clickdrop",
             "carrier_name": "royalmail_clickdrop",
-            "service": "tpn24_01",
+            "service": "TPN24",
             "currency": "GBP",
             "total_charge": 8.5,
             "transit_days": 1,
             "meta": {
                 "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
+                "carrier_service_code": "01",
                 "rate_provider": "rate_table",
             },
         }

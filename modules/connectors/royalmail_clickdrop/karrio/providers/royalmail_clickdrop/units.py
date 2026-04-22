@@ -7,14 +7,20 @@ import karrio.lib as lib
 import karrio.core.units as units
 import karrio.core.models as models
 
+
 class LabelType(lib.Enum):
     PDF = "PDF"
 
 
 class ConnectionConfig(lib.Enum):
     """Carrier connection configuration options."""
-    include_label_in_response = lib.OptionEnum("include_label_in_response", bool, True, True)
-    include_return_label_in_response = lib.OptionEnum("include_return_label_in_response", bool, False, False)
+
+    include_label_in_response = lib.OptionEnum(
+        "include_label_in_response", bool, True, True
+    )
+    include_return_label_in_response = lib.OptionEnum(
+        "include_return_label_in_response", bool, False, False
+    )
 
     base_url = lib.OptionEnum("base_url", str)
     tracking_base_url = lib.OptionEnum("tracking_base_url", str)
@@ -23,6 +29,7 @@ class ConnectionConfig(lib.Enum):
 
     shipping_options = lib.OptionEnum("shipping_options", list)
     shipping_services = lib.OptionEnum("shipping_services", list)
+
 
 class TrackingIncidentReason(lib.Enum):
     carrier_damaged_parcel = ["DAMAGED"]
@@ -46,6 +53,7 @@ class TrackingIncidentReason(lib.Enum):
     delivery_exception_undeliverable = ["UNDELIVERABLE"]
 
     unknown = []
+
 
 class WeightUnit(lib.Enum):
     G = "G"
@@ -116,8 +124,13 @@ def dimension_to_mms(value, unit=None, default=None) -> typing.Optional[int]:
     if amount is None:
         return default
 
-    factor = _DIMENSION_FACTORS.get(code, Decimal("1")) if code is not None else Decimal("1")
+    factor = (
+        _DIMENSION_FACTORS.get(code, Decimal("1"))
+        if code is not None
+        else Decimal("1")
+    )
     return _round_decimal(amount * factor)
+
 
 def weight_to_grams(value, unit=None, default=None) -> typing.Optional[int]:
     amount = _decimal(value)
@@ -152,6 +165,7 @@ def weight_in_grams(weight, default=None) -> typing.Optional[int]:
 
     return weight_to_grams(weight, default=default)
 
+
 def dimension_in_mms(measurement, default=None) -> typing.Optional[int]:
     if measurement is None:
         return default
@@ -170,6 +184,7 @@ def dimension_in_mms(measurement, default=None) -> typing.Optional[int]:
 
     raw = _decimal(measurement)
     return _round_decimal(raw) if raw is not None else default
+
 
 class PackagingType(lib.StrEnum):
     """
@@ -250,10 +265,7 @@ class ShippingService(lib.StrEnum):
     Notes:
     - These are convenience aliases only.
     - The full selectable service catalog comes from services.csv.
-    - Duplicate posting-location variants belong in services.csv, not here.
     """
-
-    mp7_01 = "MP7"
 
     # Domestic outbound
     first_class = "BPL1"
@@ -321,6 +333,7 @@ class ShippingService(lib.StrEnum):
     express24_returns = "RT0"
     express48_returns = "RTA"
     tracked_returns_48 = "TSS"
+
 
 class ShippingOption(lib.Enum):
     """Royal Mail Click & Drop carrier options."""
@@ -390,6 +403,7 @@ class ShippingOption(lib.Enum):
     signature_confirmation = request_signature_upon_delivery
     dangerous_goods = contains_dangerous_goods
 
+
 OPTION_ALIASES = {
     # legacy / RM-style input keys
     "orderDate": "order_date",
@@ -411,6 +425,16 @@ OPTION_ALIASES = {
     "dangerousGoodsUnCode": "dangerous_goods_un_code",
     "dangerousGoodsDescription": "dangerous_goods_description",
     "dangerousGoodsQuantity": "dangerous_goods_quantity",
+
+    # standard Karrio shipment option aliases
+    "email_notification": "receive_email_notification",
+    "sms_notification": "receive_sms_notification",
+    "invoice_number": "commercial_invoice_number",
+    "invoice_date": "commercial_invoice_date",
+    "dangerous_good": "contains_dangerous_goods",
+    "ioss": "ioss_number",
+    "eori_number": "recipient_eori_number",
+    "nip_number": "air_number",
 
     # current connector-specific legacy names
     "rm_order_date": "order_date",
@@ -442,8 +466,7 @@ def shipping_options_initializer(
     package_options: units.ShippingOptions = None,
 ) -> units.ShippingOptions:
     """Apply default values to the given options."""
-    resolved = dict(package_options.content if package_options is not None else {})
-    resolved.update(options or {})
+    resolved = dict(options or {})
 
     if package_options is not None:
         resolved.update(package_options.content)
@@ -461,6 +484,7 @@ def shipping_options_initializer(
         items_filter=items_filter,
     )
 
+
 def load_services_from_csv() -> list:
     csv_path = pathlib.Path(__file__).resolve().parent / "services.csv"
 
@@ -471,10 +495,14 @@ def load_services_from_csv() -> list:
 
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader((row for row in csvfile if row.strip()))
+
         for row in reader:
-            service_code = row["service_code"]
-            zone_label = row.get("zone_label", "")
-            country_codes_str = row.get("country_codes", "")
+            service_code = (row.get("service_code") or "").strip().upper()
+            if not service_code:
+                continue
+
+            zone_label = (row.get("zone_label") or "").strip()
+            country_codes_str = (row.get("country_codes") or "").strip()
             country_codes = (
                 [c.strip() for c in country_codes_str.split(",") if c.strip()]
                 if country_codes_str
@@ -490,19 +518,21 @@ def load_services_from_csv() -> list:
 
             if service_code not in services_dict:
                 services_dict[service_code] = {
-                    "service_name": row["service_name"],
+                    "service_name": (row.get("service_name") or "").strip(),
                     "service_code": service_code,
-                    "carrier_service_code": row.get("carrier_service_code", service_code),
-                    "currency": row.get("currency", "GBP"),
-                    "weight_unit": row.get("weight_unit", "KG"),
-                    "dimension_unit": row.get("dimension_unit", "CM"),
+                    "carrier_service_code": (
+                        (row.get("carrier_service_code") or "").strip() or None
+                    ),
+                    "currency": (row.get("currency") or "GBP").strip(),
+                    "weight_unit": (row.get("weight_unit") or "KG").strip(),
+                    "dimension_unit": (row.get("dimension_unit") or "CM").strip(),
                     "min_weight": float(row["min_weight"]) if row.get("min_weight") else None,
                     "max_weight": float(row["max_weight"]) if row.get("max_weight") else None,
                     "max_length": float(row["max_length"]) if row.get("max_length") else None,
                     "max_width": float(row["max_width"]) if row.get("max_width") else None,
                     "max_height": float(row["max_height"]) if row.get("max_height") else None,
-                    "domicile": row.get("domicile", "").lower() == "true",
-                    "international": row.get("international", "").lower() == "true",
+                    "domicile": str(row.get("domicile", "")).lower() == "true",
+                    "international": str(row.get("international", "")).lower() == "true",
                     "zones": [zone],
                 }
             else:
@@ -515,43 +545,35 @@ DEFAULT_SERVICES = load_services_from_csv()
 
 
 def _services_index() -> dict[str, models.ServiceLevel]:
-    return {str(svc.service_code).lower(): svc for svc in DEFAULT_SERVICES}
-
-
-def _carrier_codes() -> set[str]:
-    return {
-        str(svc.carrier_service_code).upper()
-        for svc in DEFAULT_SERVICES
-        if svc.carrier_service_code
-    }
+    return {str(svc.service_code).lower(): svc for svc in DEFAULT_SERVICES if svc.service_code}
 
 
 SERVICES_INDEX = _services_index()
-CARRIER_SERVICE_CODES = _carrier_codes()
 
 RETURN_SERVICE_CODES = {
-    "RT0", "RT1", "RT2", "RT3",
-    "RTA", "RTB", "RTC", "RTD",
+    "RT0",
+    "RT1",
+    "RT2",
+    "RT3",
+    "RTA",
+    "RTB",
+    "RTC",
+    "RTD",
     "TSS",
 }
 
 
 def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[str]:
     """
-    Resolve a Karrio-facing service selector to a Royal Mail API service code.
+    Resolve a Karrio-facing service selector to a Royal Mail API serviceCode.
 
     Supported inputs:
-    - exact CSV service keys, e.g. 'tpn24_01'
+    - exact CSV service codes, e.g. 'TPN24'
     - exact enum aliases, e.g. 'tracked_24'
-    - exact direct carrier codes, e.g. 'TPN24'
 
     Returns:
-    - Royal Mail carrier service code string
+    - Royal Mail serviceCode string
     - None for empty or unknown input
-
-    Notes:
-    - Matching is strict.
-    - Similar or normalized values such as 'express48' are not resolved.
     """
     if service is None:
         return None
@@ -562,9 +584,9 @@ def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[st
 
     key = value.lower()
 
-    # 1. exact CSV service key
+    # 1. exact CSV service code
     if key in SERVICES_INDEX:
-        return SERVICES_INDEX[key].carrier_service_code
+        return SERVICES_INDEX[key].service_code
 
     # 2. exact enum alias
     alias_map = {
@@ -574,17 +596,29 @@ def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[st
     if key in alias_map:
         return alias_map[key]
 
-    # 3. exact carrier code
-    if value.upper() in CARRIER_SERVICE_CODES:
-        return value.upper()
-
-    # 4. strict mode: unknown services are invalid
     return None
+
+
+def resolve_service_register_code(service: typing.Optional[str]) -> typing.Optional[str]:
+    """
+    Resolve a Karrio-facing service selector to the Royal Mail API
+    serviceRegisterCode defined in services.csv.
+    """
+    resolved_service_code = resolve_carrier_service(service)
+
+    if resolved_service_code is None:
+        return None
+
+    service_level = SERVICES_INDEX.get(str(resolved_service_code).lower())
+    if service_level is None:
+        return None
+
+    return service_level.carrier_service_code
+
 
 def is_return_service(service: typing.Optional[str]) -> bool:
     resolved = resolve_carrier_service(service)
     return resolved in RETURN_SERVICE_CODES if resolved else False
-
 
 
 def build_dimensions(package, dimension_type, raw_package=None):
@@ -621,6 +655,7 @@ def build_dimensions(package, dimension_type, raw_package=None):
         widthInMms=width_in_mms,
         depthInMms=depth_in_mms,
     )
+
 
 def resolve_package_format(
     package=None,
@@ -673,21 +708,22 @@ def resolve_package_format(
         if raw_dimension_unit is not None
         else None
     )
+    if length_mm is None and package is not None:
+        length_mm = dimension_in_mms(getattr(package, "length", None))
+
     width_mm = (
         dimension_to_mms(_source_value(raw_package, "width"), raw_dimension_unit)
         if raw_dimension_unit is not None
         else None
     )
+    if width_mm is None and package is not None:
+        width_mm = dimension_in_mms(getattr(package, "width", None))
+
     height_mm = (
         dimension_to_mms(_source_value(raw_package, "height"), raw_dimension_unit)
         if raw_dimension_unit is not None
         else None
     )
-
-    if length_mm is None and package is not None:
-        length_mm = dimension_in_mms(getattr(package, "length", None))
-    if width_mm is None and package is not None:
-        width_mm = dimension_in_mms(getattr(package, "width", None))
     if height_mm is None and package is not None:
         height_mm = dimension_in_mms(getattr(package, "height", None))
 
@@ -725,6 +761,7 @@ def resolve_package_format(
         return PackagingType.large_parcel.value
 
     return PackagingType.small_parcel.value
+
 
 def resolve_customs_category(category):
     mapping = {
