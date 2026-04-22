@@ -9,17 +9,187 @@ from unittest.mock import ANY
 
 import karrio.sdk as karrio
 
+#old gateway
+#gateway = karrio.gateway["royalmail_clickdrop"].create(
+#    dict(
+#        id="123456789",
+#        test_mode=False,
+#        carrier_id="royalmail_clickdrop",
+#        api_key="TEST_API_KEY",
+#        account_number="123456789",
+#        config={},
+#    )
+#)
 
 gateway = karrio.gateway["royalmail_clickdrop"].create(
-    dict(
-        id="123456789",
-        test_mode=False,
-        carrier_id="royalmail_clickdrop",
-        api_key="TEST_API_KEY",
-        account_number="123456789",
-        config={},
-    )
+    {
+        "id": "123456789",
+        "carrier_id": "royalmail_clickdrop",
+        "api_key": "CLICKDROP_API_KEY",
+        "account_number": "123456789",
+        "tracking_client_id": "ROYALMAIL_TRACKING_CLIENT_ID",
+        "tracking_client_secret": "ROYALMAIL_TRACKING_CLIENT_SECRET",
+        "config": {
+            "base_url": "https://api.parcel.royalmail.com/api/v1",
+            "tracking_base_url": "https://api.royalmail.net",
+        },
+    }
 )
+
+# ---------------------------------------------------------------------------
+# Tracking payload catalog
+# ---------------------------------------------------------------------------
+TrackingPayload = {
+    "tracking_numbers": ["090367574000000FE1E1B"],
+}
+
+TrackingRequestJSON = ["090367574000000FE1E1B"]
+
+
+TrackingResponseJSON = """{
+  "mailPieces": {
+    "mailPieceId": "090367574000000FE1E1B",
+    "carrierShortName": "RM",
+    "carrierFullName": "Royal Mail Group Ltd",
+    "summary": {
+      "uniqueItemId": "090367574000000FE1E1B",
+      "oneDBarcode": "FQ087430672GB",
+      "productId": "SD2",
+      "productName": "Special Delivery Guaranteed",
+      "productDescription": "Our guaranteed next working day service with tracking and a signature on delivery",
+      "productCategory": "NON-INTERNATIONAL",
+      "destinationCountryCode": "GBR",
+      "destinationCountryName": "United Kingdom of Great Britain and Northern Ireland",
+      "originCountryCode": "GBR",
+      "originCountryName": "United Kingdom of Great Britain and Northern Ireland",
+      "lastEventCode": "EVNMI",
+      "lastEventName": "Forwarded - Mis-sort",
+      "lastEventDateTime": "2016-10-20T10:04:00+0000",
+      "lastEventLocationName": "Stafford DO",
+      "statusDescription": "It's being redirected",
+      "statusCategory": "IN TRANSIT",
+      "statusHelpText": "The item is in transit and a confirmation will be provided on delivery.",
+      "summaryLine": "Item FQ087430672GB was forwarded to the Delivery Office on 2016-10-20."
+    },
+    "estimatedDelivery": {
+      "date": "2017-02-20",
+      "startOfEstimatedWindow": "08:00:00+0000",
+      "endOfEstimatedWindow": "11:00:00+0000"
+    },
+    "events": [
+      {
+        "eventCode": "EVNMI",
+        "eventName": "Forwarded - Mis-sort",
+        "eventDateTime": "2016-10-20T10:04:00+0000",
+        "locationName": "Stafford DO"
+      }
+    ]
+  }
+}"""
+
+
+TrackingResponseWithoutSummaryJSON = """{
+  "mailPieces": {
+    "mailPieceId": "090367574000000FE1E1B",
+    "carrierShortName": "RM",
+    "carrierFullName": "Royal Mail Group Ltd",
+    "events": [
+      {
+        "eventCode": "EVNPS",
+        "eventName": "Ready for redelivery or collection",
+        "eventDateTime": "2016-10-21T07:30:00+0000",
+        "locationName": "Mount Pleasant MC"
+      }
+    ]
+  }
+}"""
+
+
+TrackingErrorResponseJSON = """{
+  "httpCode": "400",
+  "httpMessage": "Bad Request",
+  "errors": [
+    {
+      "errorCode": "E0004",
+      "errorDescription": "Failed header validation for X-Accept-RMG-Terms",
+      "errorCause": "The submitted request was not valid against the required header definition",
+      "errorResolution": "Please check the API request against the required header definition and re-submit"
+    }
+  ]
+}"""
+
+
+ParsedTrackingResponse = [
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "tracking_number": "090367574000000FE1E1B",
+            "delivered": False,
+            "estimated_delivery": "2017-02-20",
+            "events": [
+                {
+                    "code": "EVNMI",
+                    "date": "2016-10-20",
+                    "description": "Forwarded - Mis-sort",
+                    "location": "Stafford DO",
+                    "reason": "carrier_sorting_error",
+                    "time": "10:04 AM",
+                    "timestamp": "2016-10-20T10:04:00.000Z",
+                }
+            ],
+        }
+    ],
+    [],
+]
+
+
+ParsedTrackingResponseWithoutSummary = [
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "tracking_number": "090367574000000FE1E1B",
+            "delivered": False,
+            "events": [
+                {
+                    "code": "EVNPS",
+                    "date": "2016-10-21",
+                    "description": "Ready for redelivery or collection",
+                    "location": "Mount Pleasant MC",
+                    "reason": "consignee_not_home",
+                    "time": "07:30 AM",
+                    "timestamp": "2016-10-21T07:30:00.000Z",
+                }
+            ],
+        }
+    ],
+    [],
+]
+
+
+ParsedTrackingErrorResponse = [
+    [],
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "400",
+            "message": "Bad Request",
+            "details": {
+                "tracking_number": "090367574000000FE1E1B",
+                "errors": [
+                    {
+                        "errorCode": "E0004",
+                        "errorDescription": "Failed header validation for X-Accept-RMG-Terms",
+                        "errorCause": "The submitted request was not valid against the required header definition",
+                        "errorResolution": "Please check the API request against the required header definition and re-submit",
+                    }
+                ],
+            },
+        }
+    ],
+]
 
 # ---------------------------------------------------------------------------
 # Shipment payload catalog
@@ -101,12 +271,14 @@ ShipmentPayloadRichBase = {
         "commercial_invoice_date": "2024-01-01T10:00:00Z",
         "tags": [{"key": "channel", "value": "web"}],
         "billing": {
-            "addressLine1": "2 Billing Street",
-            "city": "London",
-            "postcode": "EC1A1AA",
-            "countryCode": "GB",
-            "fullName": "Billing Contact",
-            "companyName": "Example Ltd",
+            "address": {
+                "addressLine1": "2 Billing Street",
+                "city": "London",
+                "postcode": "EC1A1AA",
+                "countryCode": "GB",
+                "fullName": "Billing Contact",
+                "companyName": "Example Ltd",
+            },
             "phoneNumber": "07111111111",
             "emailAddress": "billing@example.com",
         },
@@ -126,6 +298,18 @@ ShipmentPayloadRichBase = {
         },
     },
 }
+
+ShipmentPayloadWithoutBilling = copy.deepcopy(ShipmentPayloadRichBase)
+ShipmentPayloadWithoutBilling["options"].pop("billing", None)
+
+ShipmentPayloadMissingBillingPostcode = copy.deepcopy(ShipmentPayloadRichBase)
+ShipmentPayloadMissingBillingPostcode["options"]["billing"]["address"].pop("postcode", None)
+
+ShipmentPayloadWithBilling = copy.deepcopy(ShipmentPayloadRichBase)
+
+
+ShipmentPayloadInvalidService = copy.deepcopy(ShipmentPayloadWithoutBilling)
+ShipmentPayloadInvalidService["service"] = "not_a_service"
 
 ShipmentPayloadInternational = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInternational["recipient"].update(
@@ -175,8 +359,7 @@ ShipmentPayloadWithReturnsLabel["reference"] = "ORDER-1001-RET"
 ShipmentPayloadWithReturnsLabel["options"]["order_reference"] = "ORDER-1001-RET"
 ShipmentPayloadWithReturnsLabel["options"]["include_returns_label"] = True
 
-ShipmentPayloadWithoutBilling = copy.deepcopy(ShipmentPayloadRichBase)
-ShipmentPayloadWithoutBilling["options"].pop("billing", None)
+
 
 ShipmentPayloadWithoutImporter = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadWithoutImporter["options"].pop("importer", None)
@@ -204,9 +387,10 @@ ShipmentPayloadNoExplicitTotals["options"].pop("total", None)
 ShipmentPayloadNoExplicitTotals["options"]["shipping_cost_charged"] = 3.5
 ShipmentPayloadNoExplicitTotals["options"]["order_tax"] = 1.2
 
-ShipmentPayloadMultiParcel = copy.deepcopy(ShipmentPayloadRichBase)
+ShipmentPayloadMultiParcel = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadMultiParcel["reference"] = "ORDER-1001-MULTI"
 ShipmentPayloadMultiParcel["options"]["order_reference"] = "ORDER-1001-MULTI"
+ShipmentPayloadMultiParcel["options"].pop("package_format_identifier", None)
 ShipmentPayloadMultiParcel["parcels"].append(
     {
         "weight": 900,
@@ -616,19 +800,8 @@ ParsedShipmentErrorResponse = [
     ],
 ]
 
-ShipmentPayloadMissingBillingPostcode = copy.deepcopy(ShipmentPayloadRichBase)
-
-billing = ShipmentPayloadMissingBillingPostcode["options"].get("billing", {})
-
-# Support both the current flat fixture shape and any future nested shape.
-if isinstance(billing.get("address"), dict):
-    billing["address"].pop("postcode", None)
-    billing["address"].pop("postalCode", None)
-    billing["address"].pop("postal_code", None)
-
-billing.pop("postcode", None)
-billing.pop("postalCode", None)
-billing.pop("postal_code", None)
+ShipmentPayloadWithoutTags = copy.deepcopy(ShipmentPayloadRichBase)
+ShipmentPayloadWithoutTags["options"].pop("tags", None)
 # ---------------------------------------------------------------------------
 # Cancel shipment
 # ---------------------------------------------------------------------------

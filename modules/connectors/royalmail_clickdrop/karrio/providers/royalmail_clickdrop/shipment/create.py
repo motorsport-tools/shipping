@@ -63,46 +63,18 @@ def _to_float(value, default=None):
     except (TypeError, ValueError):
         return default
 
-def _first_value(source, *keys):
-    if source is None:
-        return None
-
-    for key in keys:
-        value = provider_utils.get_value(source, key)
-        if value not in [None, ""]:
-            return value
-
-    return None
-
-
-def _billing_value(billing, *keys):
-    address = provider_utils.get_value(billing, "address")
-
-    return (
-        _first_value(address, *keys)
-        or _first_value(billing, *keys)
-    )
-
-def _validate_billing_details(billing):
+def _validate_billing_address(billing):
     if not billing:
         return
 
+    address = provider_utils.get_value(billing, "address") or {}
     missing = []
 
-    if _billing_value(billing, "addressLine1", "address_line1") in [None, ""]:
-        missing.append("options.billing.address.addressLine1")
+    for field in ["addressLine1", "city", "countryCode"]:
+        if provider_utils.get_value(address, field) in [None, ""]:
+            missing.append(f"options.billing.address.{field}")
 
-    if _billing_value(billing, "city") in [None, ""]:
-        missing.append("options.billing.address.city")
-
-    if _billing_value(billing, "countryCode", "country_code") in [None, ""]:
-        missing.append("options.billing.address.countryCode")
-
-    # Business-required for your Royal Mail billing flow
-    if _billing_value(billing, "postcode", "postalCode", "postal_code") in [None, ""]:
-        missing.append("options.billing.address.postcode")
-
-    if any(missing):
+    if missing:
         raise ValueError(
             "Royal Mail Click & Drop shipment validation failed. "
             f"Missing required billing field(s): {', '.join(missing)}"
@@ -375,6 +347,8 @@ def shipment_request(
         package_options=packages.options,
         initializer=provider_units.shipping_options_initializer,
     )
+    raw_options = payload.options or {}
+
     customs = (
         lib.to_customs_info(
             payload.customs,
@@ -446,12 +420,13 @@ def shipment_request(
         )
     )
 
-    billing = options.billing.state
-    _validate_billing_details(billing)
-    importer = options.importer.state
-    tags = options.tags.state or []
+    billing = provider_utils.get_value(raw_options, "billing")
+    billing_address = provider_utils.get_value(billing, "address") or {}
+    _validate_billing_address(billing)
+
+    importer = provider_utils.get_value(raw_options, "importer")
+    tags = provider_utils.get_value(raw_options, "tags")
     raw_parcels = list(payload.parcels or [])
-    billing_address = provider_utils.get_value(billing, "address") or billing
 
 
     # YAML note:
@@ -522,62 +497,18 @@ def shipment_request(
                 billing=(
                     royalmail_clickdrop_req.BillingType(
                         address=royalmail_clickdrop_req.AddressType(
-                            fullName=_billing_value(
-                                billing,
-                                "fullName",
-                                "person_name",
-                                "companyName",
-                                "company_name",
-                            ),
-                            companyName=_billing_value(
-                                billing,
-                                "companyName",
-                                "company_name",
-                            ),
-                            addressLine1=_billing_value(
-                                billing,
-                                "addressLine1",
-                                "address_line1",
-                            ),
-                            addressLine2=_billing_value(
-                                billing,
-                                "addressLine2",
-                                "address_line2",
-                            ),
-                            addressLine3=_billing_value(
-                                billing,
-                                "addressLine3",
-                                "address_line3",
-                            ),
-                            city=_billing_value(billing, "city"),
-                            county=_billing_value(
-                                billing,
-                                "county",
-                                "state_code",
-                                "state_name",
-                            ),
-                            postcode=_billing_value(
-                                billing,
-                                "postcode",
-                                "postalCode",
-                                "postal_code",
-                            ),
-                            countryCode=_billing_value(
-                                billing,
-                                "countryCode",
-                                "country_code",
-                            ),
+                            fullName=provider_utils.get_value(billing_address, "fullName"),
+                            companyName=provider_utils.get_value(billing_address, "companyName"),
+                            addressLine1=provider_utils.get_value(billing_address, "addressLine1"),
+                            addressLine2=provider_utils.get_value(billing_address, "addressLine2"),
+                            addressLine3=provider_utils.get_value(billing_address, "addressLine3"),
+                            city=provider_utils.get_value(billing_address, "city"),
+                            county=provider_utils.get_value(billing_address, "county"),
+                            postcode=provider_utils.get_value(billing_address, "postcode"),
+                            countryCode=provider_utils.get_value(billing_address, "countryCode"),
                         ),
-                        phoneNumber=_first_value(
-                            billing,
-                            "phoneNumber",
-                            "phone_number",
-                        ),
-                        emailAddress=_first_value(
-                            billing,
-                            "emailAddress",
-                            "email",
-                        ),
+                        phoneNumber=provider_utils.get_value(billing, "phoneNumber"),
+                        emailAddress=provider_utils.get_value(billing, "emailAddress"),
                     )
                     if billing
                     else None
@@ -652,7 +583,8 @@ def shipment_request(
                         )
                         for tag in tags
                     ]
-                    or None
+                    if tags is not None
+                    else None
                 ),
                 label=royalmail_clickdrop_req.LabelType(
                     includeLabelInResponse=include_label_in_response,
@@ -710,4 +642,6 @@ def shipment_request(
         ]
     )
 
-    return lib.Serializable(request, lib.to_dict)
+    request_data = provider_utils.clean_payload(lib.to_dict(request)) or {}
+
+    return lib.Serializable(request_data, lambda data: data)

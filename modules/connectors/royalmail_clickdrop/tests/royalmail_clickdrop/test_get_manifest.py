@@ -1,4 +1,5 @@
  
+ 
 """Royal Mail Click and Drop carrier get manifest helper tests."""
 
 import unittest
@@ -71,5 +72,4 @@ class TestRoyalMailClickandDropGetManifest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

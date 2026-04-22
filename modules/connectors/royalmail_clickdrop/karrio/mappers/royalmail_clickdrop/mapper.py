@@ -176,3 +176,13 @@ class Mapper(mapper.Mapper):
             lib.Deserializable(payload, lambda x: x),
             self.settings,
         )
+    
+    def create_tracking_request(
+    self, payload: models.TrackingRequest
+    ) -> lib.Serializable:
+        return provider.tracking_request(payload, self.settings)
+
+    def parse_tracking_response(
+        self, response: lib.Deserializable[typing.Any]
+    ) -> typing.Tuple[typing.List[models.TrackingDetails], typing.List[models.Message]]:
+        return provider.parse_tracking_response(response, self.settings)

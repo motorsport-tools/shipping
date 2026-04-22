@@ -53,13 +53,30 @@ def _resolve_country_iso3(country_code: str) -> str:
 
     return code
 
+def _build_return_address(address) -> royalmail_return_req.AddressType:
+    first_name, last_name = _split_name(address.person_name)
 
-def _clean_dict(data: dict) -> dict:
-    return {
-        key: value
-        for key, value in data.items()
-        if value not in [None, "", [], {}]
-    }
+    return royalmail_return_req.AddressType(
+        **(
+            provider_utils.clean_payload(
+                {
+                    "title": None,
+                    "firstName": first_name or None,
+                    "lastName": last_name or None,
+                    "companyName": address.company_name,
+                    "addressLine1": address.address_line1,
+                    "addressLine2": address.address_line2,
+                    "addressLine3": address.address_line3,
+                    "city": address.city,
+                    "county": address.state_name or address.state_code,
+                    "postcode": address.postal_code,
+                    "country": _resolve_country_name(address),
+                    "countryIsoCode": _resolve_country_iso3(address.country_code),
+                }
+            )
+            or {}
+        )
+    )
 
 def parse_return_shipment_response(
     _response: lib.Deserializable[dict],
@@ -158,46 +175,14 @@ def return_shipment_request(
             serviceCode=service_code,
         ),
         shipment=royalmail_return_req.ShipmentType(
-            shippingAddress=royalmail_return_req.AddressType(
-                **_clean_dict(
-                    {
-                        "title": None,
-                        "firstName": shipper_first_name or None,
-                        "lastName": shipper_last_name or None,
-                        "companyName": shipper.company_name,
-                        "addressLine1": shipper.address_line1,
-                        "addressLine2": shipper.address_line2,
-                        "addressLine3": shipper.address_line3,
-                        "city": shipper.city,
-                        "county": shipper.state_name or shipper.state_code,
-                        "postcode": shipper.postal_code,
-                        "country": _resolve_country_name(shipper),
-                        "countryIsoCode": _resolve_country_iso3(shipper.country_code),
-                    }
-                )
-            ),
-            returnAddress=royalmail_return_req.AddressType(
-                **_clean_dict(
-                    {
-                        "title": None,
-                        "firstName": recipient_first_name or None,
-                        "lastName": recipient_last_name or None,
-                        "companyName": recipient.company_name,
-                        "addressLine1": recipient.address_line1,
-                        "addressLine2": recipient.address_line2,
-                        "addressLine3": recipient.address_line3,
-                        "city": recipient.city,
-                        "county": recipient.state_name or recipient.state_code,
-                        "postcode": recipient.postal_code,
-                        "country": _resolve_country_name(recipient),
-                        "countryIsoCode": _resolve_country_iso3(recipient.country_code),
-                    }
-                )
-            ),
+            shippingAddress=_build_return_address(shipper),
+            returnAddress=_build_return_address(recipient),
             customerReference=royalmail_return_req.CustomerReferenceType(
                 reference=payload.reference or getattr(payload, "id", None),
             ),
         ),
     )
 
-    return lib.Serializable(request, lib.to_dict)
+    request_data = provider_utils.clean_payload(lib.to_dict(request)) or {}
+
+    return lib.Serializable(request_data, lambda data: data)

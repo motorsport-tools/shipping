@@ -258,6 +258,33 @@ def _parse_failed_orders(
 
     return messages
 
+def parse_tracking_error_response(
+    response: dict,
+    settings: provider_utils.Settings,
+    **kwargs,
+) -> typing.List[models.Message]:
+    if not isinstance(response, dict):
+        return []
+
+    if not any(key in response for key in ["httpCode", "httpMessage"]):
+        return []
+
+    details = dict(kwargs)
+
+    if response.get("moreInformation"):
+        details["information"] = response.get("moreInformation")
+
+    if response.get("errors"):
+        details["errors"] = response.get("errors")
+
+    return [
+        _message(
+            settings,
+            code=str(response.get("httpCode") or "error"),
+            message=response.get("httpMessage") or "Tracking error",
+            details=details,
+        )
+    ]
 
 def parse_error_response(
     response: typing.Any,

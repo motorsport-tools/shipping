@@ -1,4 +1,3 @@
- 
 """Royal Mail Click and Drop carrier settings tests."""
 
 import copy
@@ -7,6 +6,7 @@ import unittest
 import karrio.core.models as models
 import karrio.lib as lib
 import karrio.sdk as karrio
+
 from . import fixture
 
 
@@ -27,13 +27,8 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         )
 
     def test_default_settings_values(self):
-        """Verify default connection settings, headers, authorization, and label type are initialized correctly."""
+        """Initialize default connection settings and auth values correctly."""
         gateway = self._gateway()
-
-        print("DEBUG default server_url:", gateway.settings.server_url)
-        print("DEBUG default headers:", gateway.settings.headers)
-        print("DEBUG default label_type:", gateway.settings.label_type)
-
 
         self.assertEqual(
             gateway.settings.server_url,
@@ -48,17 +43,9 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         self.assertIsInstance(gateway.settings.config, dict)
 
     def test_server_url_uses_connection_config_base_url(self):
-        """Verify a configured base_url overrides the default Royal Mail API server URL and is normalized consistently."""
+        """Normalize configured base_url overrides consistently."""
         gateway = self._gateway(
-            config={
-                "base_url": "https://example.test/custom/api/",
-            }
-        )
-
-        print("DEBUG server_url:", gateway.settings.server_url)
-        print(
-            "DEBUG connection_config.base_url.state:",
-            gateway.settings.connection_config.base_url.state,
+            config={"base_url": "https://example.test/custom/api/"}
         )
 
         self.assertEqual(
@@ -71,7 +58,7 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         )
 
     def test_connection_config_label_flags_flow_into_shipment_request(self):
-        """Verify connector-level label flag defaults are applied when the shipment request does not override them."""
+        """Apply connector-level label defaults when shipment options do not override them."""
         gateway = self._gateway(
             config={
                 "include_label_in_response": False,
@@ -79,64 +66,38 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
             }
         )
 
-        shipment_payload = copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
-        shipment = models.ShipmentRequest(**shipment_payload)
+        shipment = models.ShipmentRequest(**copy.deepcopy(fixture.ShipmentPayloadWithoutBilling))
         request = gateway.mapper.create_shipment_request(shipment)
         serialized = lib.to_dict(request.serialize())
 
-        self.assertEqual(
-            serialized["items"][0]["label"]["includeLabelInResponse"],
-            False,
-        )
-        self.assertEqual(
-            serialized["items"][0]["label"]["includeReturnsLabel"],
-            True,
-        )
+        self.assertFalse(serialized["items"][0]["label"]["includeLabelInResponse"])
+        self.assertTrue(serialized["items"][0]["label"]["includeReturnsLabel"])
 
     def test_request_label_flags_override_connection_config(self):
-            """Verify shipment-level label options take precedence over connection-level defaults."""
-            gateway = self._gateway(
-                config={
-                    "include_label_in_response": False,
-                    "include_return_label_in_response": False,
-                }
-            )
-
-            shipment_payload = copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
-            shipment_payload["reference"] = "ORDER-1001-RET"
-            shipment_payload["options"]["order_reference"] = "ORDER-1001-RET"
-            shipment_payload["options"]["include_returns_label"] = True
-            shipment_payload["options"]["include_label_in_response"] = True
-
-            shipment = models.ShipmentRequest(**shipment_payload)
-            request = gateway.mapper.create_shipment_request(shipment)
-            serialized = lib.to_dict(request.serialize())
-
-            self.assertEqual(
-                serialized["items"][0]["label"]["includeLabelInResponse"],
-                True,
-            )
-            self.assertEqual(
-                serialized["items"][0]["label"]["includeReturnsLabel"],
-                True,
-            )
-
-    def test_shipping_carrier_name_uses_connection_config_state(self):
-        """Verify the configured carrier name is exposed through settings for downstream request builders."""
+        """Let shipment-level label options override connection-level defaults."""
         gateway = self._gateway(
             config={
-                "carrier_name": "Royal Mail OBA",
+                "include_label_in_response": False,
+                "include_return_label_in_response": False,
             }
         )
 
-        print(
-            "DEBUG connection_config.carrier_name.state:",
-            gateway.settings.connection_config.carrier_name.state,
-        )
-        print(
-            "DEBUG settings.shipping_carrier_name:",
-            gateway.settings.shipping_carrier_name,
-        )
+        payload = copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
+        payload["reference"] = "ORDER-1001-RET"
+        payload["options"]["order_reference"] = "ORDER-1001-RET"
+        payload["options"]["include_returns_label"] = True
+        payload["options"]["include_label_in_response"] = True
+
+        shipment = models.ShipmentRequest(**payload)
+        request = gateway.mapper.create_shipment_request(shipment)
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertTrue(serialized["items"][0]["label"]["includeLabelInResponse"])
+        self.assertTrue(serialized["items"][0]["label"]["includeReturnsLabel"])
+
+    def test_shipping_carrier_name_uses_connection_config_state(self):
+        """Expose configured carrier_name through settings."""
+        gateway = self._gateway(config={"carrier_name": "Royal Mail OBA"})
 
         self.assertEqual(
             gateway.settings.connection_config.carrier_name.state,
@@ -148,12 +109,8 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         )
 
     def test_request_option_carrier_name_overrides_connection_config(self):
-        """Verify request-level carrier_name overrides connector defaults for shipments while manifests still use connector defaults when no request override is present."""
-        gateway = self._gateway(
-            config={
-                "carrier_name": "Royal Mail Default",
-            }
-        )
+        """Let shipment carrier_name override connector default while manifests still use connector default."""
+        gateway = self._gateway(config={"carrier_name": "Royal Mail Default"})
 
         shipment_payload = copy.deepcopy(fixture.ShipmentPayload)
         shipment_payload["options"]["carrier_name"] = "Royal Mail OBA"
@@ -161,8 +118,6 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         shipment = models.ShipmentRequest(**shipment_payload)
         request = gateway.mapper.create_shipment_request(shipment)
         serialized = lib.to_dict(request.serialize())
-
-        print("DEBUG shipment request:", serialized)
 
         self.assertEqual(
             serialized["items"][0]["postageDetails"]["carrierName"],
@@ -176,13 +131,9 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         manifest_request = gateway.mapper.create_manifest_request(manifest)
         manifest_serialized = lib.to_dict(manifest_request.serialize())
 
-        print("DEBUG manifest request from connection config:", manifest_serialized)
-
         self.assertEqual(
             manifest_serialized,
-            {
-                "carrierName": "Royal Mail Default",
-            },
+            {"carrierName": "Royal Mail Default"},
         )
 
 

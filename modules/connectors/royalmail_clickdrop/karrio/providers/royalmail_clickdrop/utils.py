@@ -15,6 +15,9 @@ class Settings(core.Settings):
     #for future use import and export
     account_number: str = None
 
+    tracking_client_id: str = None
+    tracking_client_secret: str = None
+
     @property
     def carrier_name(self):
         return "royalmail_clickdrop"
@@ -68,6 +71,59 @@ class Settings(core.Settings):
             return units.CountryCurrency.map(self.account_country_code).value
 
         return "GBP"
+    
+    @property
+
+    def tracking_server_url(self):
+        return (
+            self.connection_config.tracking_base_url.state
+            or "https://api.royalmail.net"
+        ).rstrip("/")
+
+    @property
+    def tracking_headers(self) -> dict:
+        if not all([self.tracking_client_id, self.tracking_client_secret]):
+            raise ValueError(
+                "Royal Mail tracking requires `tracking_client_id` and `tracking_client_secret`."
+            )
+
+        return {
+            "Accept": "application/json",
+            "X-IBM-Client-Id": self.tracking_client_id,
+            "X-IBM-Client-Secret": self.tracking_client_secret,
+            "X-Accept-RMG-Terms": "yes",
+        }
+
+def clean_payload(value):
+    """
+    Recursively clean serializer artifacts from generated schema payloads.
+
+    Safe behavior:
+    - removes None values from dicts
+    - removes None entries from lists
+    - converts empty lists to None
+    - preserves empty dicts
+    - preserves False, 0, and empty strings
+    """
+    if isinstance(value, dict):
+        cleaned = {
+            key: clean_payload(item)
+            for key, item in value.items()
+        }
+
+        return {
+            key: item
+            for key, item in cleaned.items()
+            if item is not None
+        }
+
+    if isinstance(value, list):
+        cleaned = [clean_payload(item) for item in value]
+        cleaned = [item for item in cleaned if item is not None]
+
+        return cleaned or None
+
+    return value
 
 def _format_order_identifier(value: typing.Any) -> str:
     """

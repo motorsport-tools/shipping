@@ -17,12 +17,35 @@ class ConnectionConfig(lib.Enum):
     include_return_label_in_response = lib.OptionEnum("include_return_label_in_response", bool, False, False)
 
     base_url = lib.OptionEnum("base_url", str)
+    tracking_base_url = lib.OptionEnum("tracking_base_url", str)
     carrier_name = lib.OptionEnum("carrier_name", str)
     label_type = lib.OptionEnum("label_type", LabelType)
 
     shipping_options = lib.OptionEnum("shipping_options", list)
     shipping_services = lib.OptionEnum("shipping_services", list)
 
+class TrackingIncidentReason(lib.Enum):
+    carrier_damaged_parcel = ["DAMAGED"]
+    carrier_sorting_error = ["MISROUTE", "EVNMI"]
+    carrier_parcel_lost = ["LOST"]
+    carrier_vehicle_issue = ["DELAY", "VEHICLE"]
+
+    consignee_refused = ["REFUSED", "REF"]
+    consignee_business_closed = ["CLOSED"]
+    consignee_not_home = ["NOTHOME", "EVNPS"]
+    consignee_incorrect_address = ["BADADDR", "INCORRECT"]
+    consignee_access_restricted = ["NOACCESS"]
+
+    customs_delay = ["CUSTOMS", "CUSTOMSHOLD", "EVNCU"]
+    customs_documentation = ["CUSTOMSDOC"]
+    customs_duties_unpaid = ["CUSTOMS_UNPAID"]
+
+    weather_delay = ["WEATHER"]
+
+    delivery_exception_hold = ["HOLD", "ONHOLD", "EVNHE"]
+    delivery_exception_undeliverable = ["UNDELIVERABLE"]
+
+    unknown = []
 
 class WeightUnit(lib.Enum):
     G = "G"
@@ -72,12 +95,7 @@ def _unit_code(unit) -> typing.Optional[str]:
 
 def _round_decimal(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-def _unit_code(unit) -> typing.Optional[str]:
-    if unit is None:
-        return None
 
-    value = getattr(unit, "value", unit)
-    return str(value).upper() if value is not None else None
 
 def _source_value(source, *keys):
     if source is None:

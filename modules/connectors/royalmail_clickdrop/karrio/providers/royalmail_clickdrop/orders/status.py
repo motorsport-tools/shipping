@@ -70,8 +70,9 @@ def order_status_request(payload, settings: provider_utils.Settings) -> lib.Seri
         items=[status_req.ItemType(**item) for item in normalized_items]
     )
 
-    return lib.Serializable(request, lib.to_dict)
+    request_data = provider_utils.clean_payload(lib.to_dict(request)) or {}
 
+    return lib.Serializable(request_data, lambda data: data)
 
 def parse_order_status_response(
     _response: lib.Deserializable[dict],

@@ -8,6 +8,7 @@ mkdir -p "${LIB_MODULES}"
 find "${LIB_MODULES}" -name "*.py" -exec rm -f {} \;
 touch "${LIB_MODULES}/__init__.py"
 
+# Click and drop API schemas
 kcli codegen generate "${SCHEMAS}/error_response.json" "${LIB_MODULES}/error_response.py"
 kcli codegen generate "${SCHEMAS}/manifest_request.json" "${LIB_MODULES}/manifest_request.py"
 kcli codegen generate "${SCHEMAS}/manifest_response.json" "${LIB_MODULES}/manifest_response.py"
@@ -28,3 +29,8 @@ kcli codegen generate "${SCHEMAS}/orders_response.json" "${LIB_MODULES}/orders_r
 kcli codegen generate "${SCHEMAS}/order_details_response.json" "${LIB_MODULES}/order_details_response.py"
 kcli codegen generate "${SCHEMAS}/orders_details_response.json" "${LIB_MODULES}/orders_details_response.py"
 kcli codegen generate "${SCHEMAS}/manifest_error_response.json" "${LIB_MODULES}/manifest_error_response.py"
+
+
+# Tracking API schemas
+kcli codegen generate "${SCHEMAS}/tracking_response.json" "${LIB_MODULES}/tracking_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_error_response.json" "${LIB_MODULES}/tracking_error_response.py"

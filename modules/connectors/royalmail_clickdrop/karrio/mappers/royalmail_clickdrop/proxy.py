@@ -202,3 +202,31 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
                 "token_type": "Bearer",
             }
         )
+        
+    def get_tracking(
+        self, request: lib.Serializable
+    ) -> lib.Deserializable[typing.List[typing.Tuple[str, dict]]]:
+        tracking_numbers = request.serialize()
+        _trace = self.trace_as("json")
+
+        responses = lib.run_asynchronously(
+            lambda tracking_number: (
+                tracking_number,
+                lib.request(
+                    url=f"{self.settings.tracking_server_url}/mailpieces/v2/{tracking_number}/events",
+                    trace=_trace,
+                    method="GET",
+                    headers=self.settings.tracking_headers,
+                ),
+            ),
+            tracking_numbers,
+        )
+
+        return lib.Deserializable(
+            responses,
+            lambda pairs: [
+                (tracking_number, lib.to_dict(response))
+                for tracking_number, response in pairs
+                if response is not None and any(str(response).strip())
+            ],
+        )
