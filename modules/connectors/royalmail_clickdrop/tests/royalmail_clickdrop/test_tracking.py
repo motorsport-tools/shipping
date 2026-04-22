@@ -26,7 +26,7 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
 
         self.assertEqual(
             request.serialize(),
-            fixture.TrackingRequest,
+            fixture.TrackingRequestJSON,
         )
 
     def test_get_tracking(self):
@@ -40,7 +40,7 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
 
             self.assertEqual(
                 mock.call_args[1]["url"],
-                f"{fixture.gateway.settings.tracking_server_url}/mailpieces/v2/090367574000000FE1E1B/events",
+                f"{fixture.gateway.settings.tracking_server_url}/mailpieces/v2/{fixture.TrackingRequestJSON[0]}/events",
             )
             self.assertEqual(
                 mock.call_args[1]["headers"],
@@ -50,7 +50,7 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
     def test_parse_tracking_response(self):
         """Parse a successful Royal Mail tracking events response into Karrio tracking details."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
-            mock.return_value = fixture.TrackingResponse
+            mock.return_value = fixture.TrackingResponseJSON
 
             parsed_response = (
                 karrio.Tracking.fetch(
@@ -66,7 +66,7 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
     def test_parse_tracking_error_response(self):
         """Normalize Royal Mail tracking API errors into Karrio message objects."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
-            mock.return_value = fixture.TrackingErrorResponse
+            mock.return_value = fixture.TrackingErrorResponseJSON
 
             parsed_response = (
                 karrio.Tracking.fetch(
@@ -82,7 +82,7 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
     def test_parse_tracking_response_without_summary(self):
         """Allow YAML-valid mailPieces responses that omit summary."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
-            mock.return_value = fixture.TrackingResponseWithoutSummary
+            mock.return_value = fixture.TrackingResponseWithoutSummaryJSON
 
             parsed_response = (
                 karrio.Tracking.fetch(
