@@ -1,0 +1,10 @@
+{
+  "errors": [
+    {
+      "errorCode": "E0016",
+      "errorDescription": "Access Denied",
+      "errorCause": "No permission to retrieve details",
+      "errorResolution": "Please re-submit your API request through correct channel"
+    }
+  ]
+}

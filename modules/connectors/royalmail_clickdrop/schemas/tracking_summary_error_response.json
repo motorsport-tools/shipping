@@ -1,0 +1,19 @@
+{
+  "mailPieces": [
+    {
+      "mailPieceId": "090367574000000FE1E1B",
+      "status": "404"
+    }
+  ],
+  "httpCode": "404",
+  "httpMessage": "Not Found",
+  "moreinformation": "One or more mail pieces could not be found",
+  "errors": [
+    {
+      "errorCode": "E1142",
+      "errorDescription": "Barcode reference 090367574000000FE1E1B isn't recognised",
+      "errorCause": "A mail item with that barcode cannot be located",
+      "errorResolution": "Check barcode and resubmit"
+    }
+  ]
+}

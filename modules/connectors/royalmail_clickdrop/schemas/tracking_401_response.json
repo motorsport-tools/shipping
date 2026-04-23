@@ -1,0 +1,5 @@
+{
+  "httpCode": "401",
+  "httpMessage": "Unauthorized",
+  "moreInformation": "Invalid client id or secret"
+}

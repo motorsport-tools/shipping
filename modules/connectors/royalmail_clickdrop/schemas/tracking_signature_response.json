@@ -1,0 +1,30 @@
+{
+  "mailPieces": {
+    "mailPieceId": "090367574000000FE1E1B",
+    "carrierShortName": "RM",
+    "carrierFullName": "Royal Mail Group Ltd",
+    "signature": {
+      "uniqueItemId": "090367574000000FE1E1B",
+      "oneDBarcode": "FQ087430672GB",
+      "recipientName": "Simon",
+      "signatureDateTime": "2017-03-30T16:15:00+01:00",
+      "imageFormat": "image/svg+xml",
+      "imageId": "001234",
+      "height": 530,
+      "width": 660,
+      "image": "<svg height=\"530\" width=\"660\"><polyline style=\"fill:none; stroke:#000000; stroke-width:4.0\" points=\"372.44107,213.46997 372.44107,210.47229 368.44662,207.47461\"/></svg>"
+    },
+    "links": {
+      "events": {
+        "href": "/mailpieces/v2/FQ087430672GB/events",
+        "title": "Events",
+        "description": "Get events"
+      },
+      "summary": {
+        "href": "/mailpieces/v2/summary?mailPieceId=090367574000000FE1E1B",
+        "title": "Summary",
+        "description": "Get summary"
+      }
+    }
+  }
+}

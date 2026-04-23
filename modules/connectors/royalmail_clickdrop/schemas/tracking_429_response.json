@@ -1,0 +1,5 @@
+{
+  "httpCode": "429",
+  "httpMessage": "Too Many Requests",
+  "moreInformation": "The rate limit has been exceeded for the plan or operation being used"
+}
