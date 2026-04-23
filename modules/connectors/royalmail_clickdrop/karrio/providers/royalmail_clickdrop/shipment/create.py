@@ -269,7 +269,11 @@ def _build_importer_type(importer, options, customs=None):
     )
 
 
-def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
+def _build_item(
+    item,
+    customs,
+    default_weight_unit=None,
+) -> royalmail_clickdrop_req.ContentType:
     metadata = provider_utils.get_value(item, "metadata", {}) or {}
     if not isinstance(metadata, dict):
         metadata = {}
@@ -282,7 +286,12 @@ def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
     )
 
     raw_item_weight = provider_utils.get_value(item, "weight")
-    raw_item_weight_unit = _value(item, "weight_unit", "weightUnit")
+    raw_item_weight_unit = _value(
+        item,
+        "weight_unit",
+        "weightUnit",
+        default=default_weight_unit,
+    )
     item_weight_in_grams = (
         provider_units.weight_to_grams(raw_item_weight, raw_item_weight_unit)
         if raw_item_weight is not None and raw_item_weight_unit is not None
@@ -345,7 +354,6 @@ def _build_item(item, customs) -> royalmail_clickdrop_req.ContentType:
         licenseNumber=_text(metadata.get("license_number"), max=41),
         certificateNumber=_text(metadata.get("certificate_number"), max=41),
     )
-
 
 def _resolve_special_instructions(options):
     return _text(
@@ -425,6 +433,11 @@ def _build_package(
         else None
     )
 
+    fallback_item_weight_unit = _first_present(
+        _value(raw_package, "weight_unit", "weightUnit"),
+        getattr(getattr(package, "weight", None), "unit", None),
+    )
+
     return royalmail_clickdrop_req.PackageType(
         weightInGrams=_coalesce(
             raw_weight_in_grams,
@@ -441,7 +454,14 @@ def _build_package(
             royalmail_clickdrop_req.DimensionsType,
             raw_package=raw_package,
         ),
-        contents=[_build_item(item, customs) for item in package_items],
+        contents=[
+            _build_item(
+                item,
+                customs,
+                default_weight_unit=fallback_item_weight_unit,
+            )
+            for item in package_items
+        ],
     )
 
 

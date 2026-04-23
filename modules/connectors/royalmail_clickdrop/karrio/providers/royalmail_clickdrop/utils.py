@@ -12,8 +12,6 @@ class Settings(core.Settings):
     """Royal Mail Click and Drop connection settings."""
 
     api_key: str
-    #for future use import and export
-    account_number: str = None
 
     tracking_client_id: str = None
     tracking_client_secret: str = None

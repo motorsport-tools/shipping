@@ -14,9 +14,7 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
     """Royal Mail Click and Drop connection settings."""
 
     api_key: str
-    #for future use of import and export accounts this allows you to select the correct crl24 service as we have tow on account, one is used for importing the other is used for exporting so we will need to have two account fields one for import and one for export but the code to apply these to created orders is not ready in create.py
-    account_number: str = None
-
+    
     """Royal Mail Tracking connection settings."""
     tracking_client_id: str = None
     tracking_client_secret: str = None
