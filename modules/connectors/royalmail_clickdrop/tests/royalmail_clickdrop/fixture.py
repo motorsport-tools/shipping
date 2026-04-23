@@ -9,24 +9,12 @@ from unittest.mock import ANY
 
 import karrio.sdk as karrio
 
-#old gateway
-#gateway = karrio.gateway["royalmail_clickdrop"].create(
-#    dict(
-#        id="123456789",
-#        test_mode=False,
-#        carrier_id="royalmail_clickdrop",
-#        api_key="TEST_API_KEY",
-#        account_number="123456789",
-#        config={},
-#    )
-#)
 
 gateway = karrio.gateway["royalmail_clickdrop"].create(
     {
         "id": "123456789",
         "carrier_id": "royalmail_clickdrop",
         "api_key": "CLICKDROP_API_KEY",
-        "account_number": "123456789",
         "tracking_client_id": "ROYALMAIL_TRACKING_CLIENT_ID",
         "tracking_client_secret": "ROYALMAIL_TRACKING_CLIENT_SECRET",
         "config": {
@@ -191,6 +179,115 @@ ParsedTrackingErrorResponse = [
     ],
 ]
 
+TrackingResponseWithProofOfDeliveryJSON = """{
+  "mailPieces": {
+    "mailPieceId": "090367574000000FE1E1B",
+    "carrierShortName": "RM",
+    "carrierFullName": "Royal Mail Group Ltd",
+    "summary": {
+      "uniqueItemId": "090367574000000FE1E1B",
+      "oneDBarcode": "FQ087430672GB",
+      "productId": "SD2",
+      "productName": "Special Delivery Guaranteed",
+      "productDescription": "Our guaranteed next working day service with tracking and a signature on delivery",
+      "productCategory": "NON-INTERNATIONAL",
+      "lastEventCode": "DELIVERED",
+      "lastEventName": "Delivered",
+      "lastEventDateTime": "2017-03-30T16:15:00+0000",
+      "lastEventLocationName": "Stafford DO",
+      "statusDescription": "Delivered",
+      "statusCategory": "DELIVERED",
+      "summaryLine": "Item was delivered."
+    },
+    "signature": {
+      "recipientName": "Simon",
+      "signatureDateTime": "2017-03-30T16:15:00+0000",
+      "imageId": "001234"
+    },
+    "events": [
+      {
+        "eventCode": "DELIVERED",
+        "eventName": "Delivered",
+        "eventDateTime": "2017-03-30T16:15:00+0000",
+        "locationName": "Stafford DO"
+      }
+    ],
+    "links": {
+      "signature": {
+        "href": "/mailpieces/v2/090367574000000FE1E1B/signature",
+        "title": "Signature",
+        "description": "Get signature"
+      }
+    }
+  }
+}"""
+
+
+TrackingSignatureResponseJSON = """{
+  "mailPieces": {
+    "mailPieceId": "090367574000000FE1E1B",
+    "carrierShortName": "RM",
+    "carrierFullName": "Royal Mail Group Ltd",
+    "signature": {
+      "uniqueItemId": "090367574000000FE1E1B",
+      "oneDBarcode": "FQ087430672GB",
+      "recipientName": "Simon",
+      "signatureDateTime": "2017-03-30T16:15:00+0000",
+      "imageFormat": "image/svg+xml",
+      "imageId": "001234",
+      "height": 530,
+      "width": 660,
+      "image": "<svg height=\\"530\\" width=\\"660\\"></svg>"
+    },
+    "links": {
+      "events": {
+        "href": "/mailpieces/v2/090367574000000FE1E1B/events",
+        "title": "Events",
+        "description": "Get events"
+      },
+      "summary": {
+        "href": "/mailpieces/v2/summary?mailPieceId=090367574000000FE1E1B",
+        "title": "Summary",
+        "description": "Get summary"
+      }
+    }
+  }
+}"""
+
+
+ParsedTrackingResponseWithProofOfDelivery = [
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "tracking_number": "090367574000000FE1E1B",
+            "delivered": True,
+            "events": [
+                {
+                    "code": "DELIVERED",
+                    "date": "2017-03-30",
+                    "description": "Delivered",
+                    "location": "Stafford DO",
+                    "time": "04:15 PM",
+                    "timestamp": "2017-03-30T16:15:00.000Z",
+                },
+                {
+                    "code": "POD",
+                    "date": "2017-03-30",
+                    "description": "Proof of delivery captured for Simon",
+                    "status": "delivered",
+                    "time": "04:15 PM",
+                    "timestamp": "2017-03-30T16:15:00.000Z",
+                },
+            ],
+            "info": {
+                "customer_name": "Simon",
+            },
+        }
+    ],
+    [],
+]
+
 # ---------------------------------------------------------------------------
 # Shipment payload catalog
 # ---------------------------------------------------------------------------
@@ -319,25 +416,13 @@ ShipmentPayloadWithBillingAddress["billing_address"] = {
     "email": "billing@example.com",
 }
 
+
 ShipmentPayloadWithOrderIdFallback = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadWithOrderIdFallback["reference"] = ""
 ShipmentPayloadWithOrderIdFallback["order_id"] = "ORDER-ID-1001"
 ShipmentPayloadWithOrderIdFallback["options"].pop("order_reference", None)
 
-ShipmentPayloadWithCustomsInvoiceFallback = copy.deepcopy(ShipmentPayloadInternational)
-ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_number", None)
-ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_date", None)
-ShipmentPayloadWithCustomsInvoiceFallback["customs"] = {
-    "content_type": "merchandise",
-    "invoice": "INV-CUSTOMS-1001",
-    "invoice_date": "2024-01-03T10:00:00Z",
-}
 
-ShipmentPayloadWithImporterFallbacks = copy.deepcopy(ShipmentPayloadInternational)
-ShipmentPayloadWithImporterFallbacks["options"].pop("importer", None)
-ShipmentPayloadWithImporterFallbacks["options"]["importer_vat_number"] = "GB123456789"
-ShipmentPayloadWithImporterFallbacks["options"]["importer_tax_code"] = "TAX-GB-1001"
-ShipmentPayloadWithImporterFallbacks["options"]["importer_eori_number"] = "GB123456789000"
 
 ShipmentPayloadWithoutItemValueWeight = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadWithoutItemValueWeight["parcels"][0]["items"] = [
@@ -377,6 +462,21 @@ ShipmentPayloadInternational["options"].update(
         "requires_export_license": False,
     }
 )
+
+ShipmentPayloadWithCustomsInvoiceFallback = copy.deepcopy(ShipmentPayloadInternational)
+ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_number", None)
+ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_date", None)
+ShipmentPayloadWithCustomsInvoiceFallback["customs"] = {
+    "content_type": "merchandise",
+    "invoice": "INV-CUSTOMS-1001",
+    "invoice_date": "2024-01-03T10:00:00Z",
+}
+
+ShipmentPayloadWithImporterFallbacks = copy.deepcopy(ShipmentPayloadInternational)
+ShipmentPayloadWithImporterFallbacks["options"].pop("importer", None)
+ShipmentPayloadWithImporterFallbacks["options"]["importer_vat_number"] = "GB123456789"
+ShipmentPayloadWithImporterFallbacks["options"]["importer_tax_code"] = "TAX-GB-1001"
+ShipmentPayloadWithImporterFallbacks["options"]["importer_eori_number"] = "GB123456789000"
 
 ShipmentPayloadWithOrderExtras = copy.deepcopy(ShipmentPayloadRichBase)
 ShipmentPayloadWithOrderExtras["reference"] = "ORDER-EXTRA-1001"

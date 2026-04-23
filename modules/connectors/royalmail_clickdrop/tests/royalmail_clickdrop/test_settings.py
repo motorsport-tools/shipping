@@ -21,7 +21,6 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
                 test_mode=False,
                 carrier_id="royalmail_clickdrop",
                 api_key="TEST_API_KEY",
-                account_number="123456789",
                 config=config or {},
             )
         )

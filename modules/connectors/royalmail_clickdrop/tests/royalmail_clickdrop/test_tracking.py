@@ -95,6 +95,42 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
                 fixture.ParsedTrackingResponseWithoutSummary,
             )
 
+    def test_get_tracking_with_proof_of_delivery(self):
+        """Fetch the Royal Mail signature endpoint when the events response exposes a POD link."""
+        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
+            mock.side_effect = [
+                fixture.TrackingResponseWithProofOfDeliveryJSON,
+                fixture.TrackingSignatureResponseJSON,
+            ]
+
+            karrio.Tracking.fetch(
+                self._tracking(fixture.TrackingPayload)
+            ).from_(fixture.gateway)
+
+            self.assertEqual(mock.call_count, 2)
+            self.assertEqual(
+                mock.call_args_list[1][1]["url"],
+                f"{fixture.gateway.settings.tracking_server_url}/mailpieces/v2/{fixture.TrackingRequestJSON[0]}/signature",
+            )
+
+    def test_parse_tracking_response_with_proof_of_delivery(self):
+        """Merge Royal Mail signature proof-of-delivery into Karrio tracking details."""
+        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
+            mock.side_effect = [
+                fixture.TrackingResponseWithProofOfDeliveryJSON,
+                fixture.TrackingSignatureResponseJSON,
+            ]
+
+            parsed_response = (
+                karrio.Tracking.fetch(
+                    self._tracking(fixture.TrackingPayload)
+                ).from_(fixture.gateway).parse()
+            )
+
+            self.assertListEqual(
+                lib.to_dict(parsed_response),
+                fixture.ParsedTrackingResponseWithProofOfDelivery,
+            )
 
 if __name__ == "__main__":
     unittest.main()
