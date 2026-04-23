@@ -12,8 +12,5 @@ class ErrorType:
 
 
 @attr.s(auto_attribs=True)
-class TrackingErrorResponseType:
-    httpCode: typing.Optional[int] = None
-    httpMessage: typing.Optional[str] = None
-    moreInformation: typing.Optional[str] = None
+class Tracking403_ResponseType:
     errors: typing.Optional[typing.List[ErrorType]] = jstruct.JList[ErrorType]

@@ -12,8 +12,15 @@ class ErrorType:
 
 
 @attr.s(auto_attribs=True)
-class TrackingErrorResponseType:
+class MailPieceType:
+    mailPieceId: typing.Optional[str] = None
+    status: typing.Optional[int] = None
+
+
+@attr.s(auto_attribs=True)
+class TrackingSummaryErrorResponseType:
+    mailPieces: typing.Optional[typing.List[MailPieceType]] = jstruct.JList[MailPieceType]
     httpCode: typing.Optional[int] = None
     httpMessage: typing.Optional[str] = None
-    moreInformation: typing.Optional[str] = None
+    moreinformation: typing.Optional[str] = None
     errors: typing.Optional[typing.List[ErrorType]] = jstruct.JList[ErrorType]
