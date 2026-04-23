@@ -33,7 +33,7 @@ endpoint coverage, this is **complete**.
 - Connection config remains in `units.py`; required credentials remain in `utils.py`.
 
 ## Important limitations
-- The provided Royal Mail Click & Drop public API spec does not expose a direct tracking endpoint. (this is a seperate API and will come later in the design)
+- The provided Royal Mail Click & Drop public API spec does not expose a direct tracking endpoint. (this is a seperate API see below)
 - The spec also does not expose a live rating endpoint in the same way other parcel APIs do like DHL or fedex.
 - The bundle therefore focuses on shipping, returns, manifests, label retrieval, and order-status operations, while still exposing the service catalog for service selection.
 - The provided Royal Mail Click & Drop public API spec yaml lists services that not all accounts use so services.csv is the source for our account services. Anything else is ignored like the examples in the yaml. for example we are intentionally Missing `guaranteedSaturdayDelivery`
@@ -46,9 +46,24 @@ capability from configured carrier service tables.
 ## Tracking model
 Tracking is implemented separately via the Royal Mail tracking API.
 
-unfinished schema for tracking API
+| Tracking API feature | Status |
+|---|---|
+| Separate Royal Mail tracking credentials | Yes |
+| Configurable tracking base URL | Yes |
+| `GET /{mailPieceId}/events` | Yes |
+| Multiple tracking numbers in one Karrio request | Yes |
+| Async fan-out across tracking numbers | Yes |
+| Tracking event normalization | Yes |
+| Delivered state inference | Yes |
+| Estimated delivery date | Yes |
+| Tracking API error normalization | Yes |
+| Response without summary | Yes |
+| `GET /{mailPieceId}/signature` | Yes |
+| Proof of delivery merge | Yes |
+| Signatory/recipient name mapping | Yes |
 
-signature image retrieval
-lightweight summary lookup
-
-tracking is not currently updating status (to be implemented later want to be sure click and drop status is working correctly first)
+Things still to cover
+- signature image retrieval, we retrieve the image but not sure how to pressent this to the user yet
+- use of Royal Mail’s up-to-30 mail piece summary query pattern (bulk tracking)
+- tracking is not currently updating status (to be implemented later want to be sure click and drop status is working correctly first) also not sure if we can set up webhooks or its a manual process to check tracking
+- estimated delivery window

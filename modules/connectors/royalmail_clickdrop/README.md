@@ -38,9 +38,9 @@ Check the [Karrio Mutli-carrier SDK docs](https://docs.karrio.io) for Shipping A
 
 ##testing
 
- **111 tests** in total in `tests/royalmail_clickdrop/`.
+ **123 tests** in total in `tests/royalmail_clickdrop/`.
 
-- `test_shipment.py` — 25
+- `test_shipment.py` — 26
 - `test_return_shipment.py` — 10
 - `test_label.py` — 8
 - `test_order_status.py` — 8
@@ -57,6 +57,6 @@ Check the [Karrio Mutli-carrier SDK docs](https://docs.karrio.io) for Shipping A
 - `test_list_orders.py` — 4
 - `test_rate.py` — 4
 - `test_retry_manifest.py` — 4
-- `test_tracking.py` — 5
+- `test_tracking.py` — 7
 
 All test payloads are contained in fixtures.py with comments for the purpose of all tests

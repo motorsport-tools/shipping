@@ -32,5 +32,17 @@ kcli codegen generate "${SCHEMAS}/manifest_error_response.json" "${LIB_MODULES}/
 
 
 # Tracking API schemas
-kcli codegen generate "${SCHEMAS}/tracking_response.json" "${LIB_MODULES}/tracking_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_request.json" "${LIB_MODULES}/tracking_request.py"
+kcli codegen generate "${SCHEMAS}/tracking_events_request.json" "${LIB_MODULES}/tracking_events_request.py"
+kcli codegen generate "${SCHEMAS}/tracking_events_response.json" "${LIB_MODULES}/tracking_events_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_summary_request.json" "${LIB_MODULES}/tracking_summary_request.py"
+kcli codegen generate "${SCHEMAS}/tracking_summary_response.json" "${LIB_MODULES}/tracking_summary_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_signature_request.json" "${LIB_MODULES}/tracking_signature_request.py"
+kcli codegen generate "${SCHEMAS}/tracking_signature_response.json" "${LIB_MODULES}/tracking_signature_response.py"
 kcli codegen generate "${SCHEMAS}/tracking_error_response.json" "${LIB_MODULES}/tracking_error_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_summary_error_response.json" "${LIB_MODULES}/tracking_summary_error_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_401_response.json" "${LIB_MODULES}/tracking_401_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_403_response.json" "${LIB_MODULES}/tracking_403_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_405_response.json" "${LIB_MODULES}/tracking_405_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_429_response.json" "${LIB_MODULES}/tracking_429_response.py"
+kcli codegen generate "${SCHEMAS}/tracking_500_response.json" "${LIB_MODULES}/tracking_500_response.py"
