@@ -21,7 +21,7 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
 
     id: str = None
     test_mode: bool = False
-    carrier_id: str = "royalmail_clickdrop"
+    carrier_id: str = "royalmail"
     account_country_code: str = None
     services: typing.List[models.ServiceLevel] = jstruct.JList[models.ServiceLevel, False, dict(default=provider_units.DEFAULT_SERVICES)]  # type: ignore
     
