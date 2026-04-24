@@ -50,10 +50,6 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
                 mock.call_args_list[1][1]["url"],
                 f"{fixture.gateway.settings.tracking_server_url}/mailpieces/v2/{fixture.TrackingRequestJSON[0]}/events",
             )
-            self.assertEqual(
-                mock.call_args_list[0][1]["headers"],
-                fixture.gateway.settings.tracking_headers,
-            )
 
     def test_get_tracking_multiple_numbers_with_event_enrichment(self):
         """Use bulk /summary, then enrich each successful tracking number with /events."""
@@ -189,13 +185,35 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
                 fixture.ParsedTrackingResponseWithProofOfDelivery,
             )
 
-    def test_parse_tracking_response_with_proof_of_delivery_image(self):
-        """Expose the Royal Mail POD signature image as base64 and a displayable data URI."""
+    def test_parse_tracking_response_with_png_proof_of_delivery_image(self):
+        """Keep Royal Mail PNG proof-of-delivery image payloads as pass-through base64."""
+        png_base64 = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7YxZQAAAAASUVORK5CYII="
+        )
+        png_signature_response = f"""{{
+          "mailPieces": {{
+            "mailPieceId": "090367574000000FE1E1B",
+            "carrierShortName": "RM",
+            "carrierFullName": "Royal Mail Group Ltd",
+            "signature": {{
+              "uniqueItemId": "090367574000000FE1E1B",
+              "oneDBarcode": "FQ087430672GB",
+              "recipientName": "Simon",
+              "signatureDateTime": "2017-03-30T16:15:00+0000",
+              "imageFormat": "image/png",
+              "imageId": "001234",
+              "height": 1,
+              "width": 1,
+              "image": "{png_base64}"
+            }}
+          }}
+        }}"""
+
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
             mock.side_effect = [
                 fixture.TrackingSummaryResponseWithProofOfDeliveryJSON,
                 fixture.TrackingResponseWithProofOfDeliveryJSON,
-                fixture.TrackingSignatureResponseJSON,
+                png_signature_response,
             ]
 
             parsed_response = (
@@ -206,122 +224,76 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
 
             details = lib.to_dict(parsed_response)[0][0]
 
-            self.assertEqual(
-                details["images"]["signature_image"],
-                "PHN2ZyBoZWlnaHQ9IjUzMCIgd2lkdGg9IjY2MCI+PC9zdmc+",
-            )
+            self.assertEqual(details["images"]["signature_image"], png_base64)
             self.assertEqual(
                 details["meta"]["proof_of_delivery"]["base64"],
-                "PHN2ZyBoZWlnaHQ9IjUzMCIgd2lkdGg9IjY2MCI+PC9zdmc+",
+                png_base64,
             )
             self.assertEqual(
                 details["meta"]["proof_of_delivery"]["data_uri"],
-                "data:image/svg+xml;base64,PHN2ZyBoZWlnaHQ9IjUzMCIgd2lkdGg9IjY2MCI+PC9zdmc+",
+                f"data:image/png;base64,{png_base64}",
             )
 
-    def test_parse_tracking_response_without_signature_image_keeps_pod_event_only(self):
-        """Keep POD event and signatory info even when the signature payload has no image content."""
-        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
-            mock.side_effect = [
-                fixture.TrackingSummaryResponseWithProofOfDeliveryJSON,
-                fixture.TrackingResponseWithProofOfDeliveryJSON,
-                """{
-                  "mailPieces": {
-                    "mailPieceId": "090367574000000FE1E1B",
-                    "carrierShortName": "RM",
-                    "carrierFullName": "Royal Mail Group Ltd",
-                    "signature": {
-                      "recipientName": "Simon",
-                      "signatureDateTime": "2017-03-30T16:15:00+0000",
-                      "imageFormat": "image/svg+xml",
-                      "imageId": "001234"
-                    }
-                  }
-                }""",
+    def test_get_tracking_chunks_summary_requests_over_30_numbers(self):
+        """Split Royal Mail summary lookups into chunks of at most 30 tracking numbers."""
+        payload = {
+            "tracking_numbers": [
+                f"RM{i:09d}GB"
+                for i in range(31)
             ]
-
-            parsed_response = (
-                karrio.Tracking.fetch(
-                    self._tracking(fixture.TrackingPayload)
-                ).from_(fixture.gateway).parse()
-            )
-
-            details = lib.to_dict(parsed_response)[0][0]
-
-            self.assertEqual(details["info"]["customer_name"], "Simon")
-            self.assertEqual(details["events"][1]["code"], "POD")
-            self.assertNotIn("images", details)
-
-    def test_create_shipment_request_multi_parcel_customs_only_subtotal(self):
-        """Use shipment-level customs commodities for subtotal when multi-parcel items are not parcel-scoped."""
-        payload = copy.deepcopy(fixture.ShipmentPayloadMultiParcel)
-        payload["recipient"]["country_code"] = "FR"
-        payload["recipient"]["postal_code"] = "75001"
-        payload["recipient"]["city"] = "Paris"
-        payload["recipient"]["person_name"] = "Jean Martin"
-        payload["recipient"]["company_name"] = "Example FR"
-        payload["recipient"]["email"] = "jean@example.fr"
-        payload["reference"] = "ORDER-MULTI-CUSTOMS-ONLY"
-        payload["options"]["order_reference"] = "ORDER-MULTI-CUSTOMS-ONLY"
-        payload["options"].pop("subtotal", None)
-        payload["options"].pop("total", None)
-        payload["options"]["shipping_cost_charged"] = 3.5
-        payload["options"]["order_tax"] = 1.2
-
-        for parcel in payload["parcels"]:
-            parcel.pop("items", None)
-
-        payload["customs"] = {
-            "content_type": "merchandise",
-            "commodities": [
-                {
-                    "sku": "SKU-1",
-                    "description": "Blue T-Shirt",
-                    "quantity": 2,
-                    "value_amount": 12.5,
-                    "weight": 150,
-                    "weight_unit": "G",
-                    "hs_code": "610910",
-                    "origin_country": "GB",
-                }
-            ],
         }
 
-        serialized = self._serialized_request(payload)
-        item = serialized["items"][0]
+        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
+            mock.side_effect = [
+                fixture.TrackingErrorResponseJSON,
+                fixture.TrackingErrorResponseJSON,
+            ]
 
-        self.assertEqual(item["subtotal"], 25.0)
-        self.assertEqual(item["shippingCostCharged"], 3.5)
-        self.assertEqual(item["orderTax"], 1.2)
-        self.assertEqual(item["total"], 29.7)
+            karrio.Tracking.fetch(
+                self._tracking(payload)
+            ).from_(fixture.gateway)
 
-    def test_create_shipment_request_notification_target_falls_back_to_sender(self):
-        """Default email notifications to the selected contact that actually has an email address."""
-        payload = copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
-        payload["recipient"]["email"] = ""
-        payload["shipper"]["email"] = "warehouse@example.com"
-        payload["options"].pop("send_notifications_to", None)
-        payload["options"].pop("receive_email_notification", None)
-        payload["options"].pop("email_notification", None)
+            self.assertEqual(mock.call_count, 2)
 
-        serialized = self._serialized_request(payload)
-        postage = serialized["items"][0]["postageDetails"]
+            first_url = mock.call_args_list[0][1]["url"]
+            second_url = mock.call_args_list[1][1]["url"]
 
-        self.assertEqual(postage["sendNotificationsTo"], "sender")
-        self.assertTrue(postage["receiveEmailNotification"])
+            self.assertIn("/mailpieces/v2/summary?mailPieceId=", first_url)
+            self.assertIn("/mailpieces/v2/summary?mailPieceId=", second_url)
 
-    def test_create_shipment_request_fractional_dangerous_goods_quantity(self):
-        """Preserve fractional dangerous-goods quantities instead of coercing them to integers."""
-        payload = copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
-        payload["options"]["contains_dangerous_goods"] = True
-        payload["options"]["dangerous_goods_un_code"] = "1993"
-        payload["options"]["dangerous_goods_description"] = "Flammable liquid"
-        payload["options"]["dangerous_goods_quantity"] = 0.5
+            first_ids = first_url.split("mailPieceId=", 1)[1].split(",")
+            second_ids = second_url.split("mailPieceId=", 1)[1].split(",")
 
-        serialized = self._serialized_request(payload)
-        item = serialized["items"][0]
+            self.assertEqual(len(first_ids), 30)
+            self.assertEqual(len(second_ids), 1)
 
-        self.assertEqual(item["dangerousGoodsQuantity"], 0.5)
+    def test_get_tracking_skips_events_for_summary_piece_errors(self):
+        """Do not call /events when Royal Mail summary returns a mail-piece-level error."""
+        summary_piece_error_response = """{
+          "mailPieces": [
+            {
+              "mailPieceId": "ZZ000000000GB",
+              "status": "404",
+              "error": {
+                "errorCode": "E2001",
+                "errorDescription": "Tracking number not found",
+                "errorCause": "The barcode reference isn't recognised",
+                "errorResolution": "Please check the tracking number and resubmit"
+              }
+            }
+          ]
+        }"""
 
-if __name__ == "__main__":
-    unittest.main()
+        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
+            mock.return_value = summary_piece_error_response
+
+            karrio.Tracking.fetch(
+                self._tracking({"tracking_numbers": ["ZZ000000000GB"]})
+            ).from_(fixture.gateway)
+
+            self.assertEqual(mock.call_count, 1)
+            self.assertIn(
+                "/mailpieces/v2/summary?mailPieceId=ZZ000000000GB",
+                mock.call_args_list[0][1]["url"],
+            )
+

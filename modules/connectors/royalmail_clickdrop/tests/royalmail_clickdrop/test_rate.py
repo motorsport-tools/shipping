@@ -5,9 +5,12 @@
 import unittest
 
 from . import fixture
+import logging
 import karrio.sdk as karrio
 import karrio.lib as lib
 import karrio.core.models as models
+
+logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropRating(unittest.TestCase):
@@ -51,5 +54,3 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
         self.assertListEqual(lib.to_dict(parsed_response), fixture.ParsedRateErrorResponse)
 
 
-if __name__ == "__main__":
-    unittest.main()

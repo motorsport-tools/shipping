@@ -5,9 +5,13 @@
 import unittest
 from unittest.mock import patch
 
-import karrio.lib as lib
-
 from . import fixture
+import logging
+import karrio.sdk as karrio
+import karrio.lib as lib
+import karrio.core.models as models
+
+logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropGetOrder(unittest.TestCase):
@@ -22,7 +26,27 @@ class TestRoyalMailClickandDropGetOrder(unittest.TestCase):
         print(f"Generated request: {request.serialize()}")
         self.assertEqual(request.serialize(), fixture.OrderLookupRequest)
 
-    
+    def test_create_get_order_request_with_string_reference(self):
+        """Encode string order references as quoted Royal Mail orderIdentifiers."""
+        request = fixture.gateway.mapper.create_get_order_request(
+            {"reference": "ORDER-1001"}
+        )
+
+        self.assertEqual(
+            request.serialize(),
+            {"orderIdentifiers": "%22ORDER-1001%22"},
+        )
+
+    def test_create_get_order_request_with_numeric_reference(self):
+        """Encode numeric-looking order references as quoted Royal Mail orderIdentifiers."""
+        request = fixture.gateway.mapper.create_get_order_request(
+            {"reference": "000123"}
+        )
+
+        self.assertEqual(
+            request.serialize(),
+            {"orderIdentifiers": "%22000123%22"},
+        )
 
     def test_get_order(self):
         """Verify the proxy sends the order lookup request to GET /orders/{orderIdentifiers}."""
@@ -70,5 +94,3 @@ class TestRoyalMailClickandDropGetOrder(unittest.TestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()

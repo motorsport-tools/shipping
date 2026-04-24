@@ -4,10 +4,13 @@ import copy
 import unittest
 from unittest.mock import patch
 
-import karrio.core.models as models
-import karrio.lib as lib
-
 from . import fixture
+import logging
+import karrio.sdk as karrio
+import karrio.lib as lib
+import karrio.core.models as models
+
+logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
@@ -206,6 +209,3 @@ class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
 
         self.assertNotIn("customerReference", serialized["shipment"])
 
-
-if __name__ == "__main__":
-    unittest.main()

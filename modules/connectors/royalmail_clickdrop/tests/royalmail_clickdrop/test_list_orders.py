@@ -5,9 +5,13 @@
 import unittest
 from unittest.mock import patch
 
-import karrio.lib as lib
-
 from . import fixture
+import logging
+import karrio.sdk as karrio
+import karrio.lib as lib
+import karrio.core.models as models
+
+logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropListOrders(unittest.TestCase):
@@ -71,5 +75,3 @@ class TestRoyalMailClickandDropListOrders(unittest.TestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()

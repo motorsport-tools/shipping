@@ -6,9 +6,11 @@ import logging
 import unittest
 from unittest.mock import patch
 
-import karrio.lib as lib
-
 from . import fixture
+import logging
+import karrio.sdk as karrio
+import karrio.lib as lib
+import karrio.core.models as models
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,48 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
                 f"{fixture.gateway.settings.server_url}/orders/12345678/label"
                 "?documentType=postageLabel&includeReturnsLabel=false&includeCN=true",
             )
+
+    def test_create_label_request_with_string_reference(self):
+        """Encode string references as quoted Royal Mail orderIdentifiers."""
+        request = fixture.gateway.mapper.create_label_request(
+            {
+                "reference": "ORDER-1001",
+                "document_type": "postageLabel",
+            }
+        )
+
+        self.assertEqual(
+            request.serialize(),
+            {
+                "orderIdentifiers": "%22ORDER-1001%22",
+                "query": {
+                    "documentType": "postageLabel",
+                    "includeReturnsLabel": False,
+                    "includeCN": None,
+                },
+            },
+        )
+
+    def test_create_label_request_with_numeric_reference(self):
+        """Encode numeric-looking references as quoted Royal Mail orderIdentifiers when supplied via reference."""
+        request = fixture.gateway.mapper.create_label_request(
+            {
+                "reference": "000123",
+                "document_type": "postageLabel",
+            }
+        )
+
+        self.assertEqual(
+            request.serialize(),
+            {
+                "orderIdentifiers": "%22000123%22",
+                "query": {
+                    "documentType": "postageLabel",
+                    "includeReturnsLabel": False,
+                    "includeCN": None,
+                },
+            },
+        )
 
     def test_parse_label_response(self):
         """Parse a PDF label response into base64-encoded Karrio document fields."""
@@ -121,6 +165,3 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
             self.assertEqual(parsed[1][0].code, "NotFound")
 
 
-
-if __name__ == "__main__":
-    unittest.main()

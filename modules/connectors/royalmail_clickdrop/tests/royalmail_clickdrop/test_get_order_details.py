@@ -4,10 +4,13 @@
 
 import unittest
 from unittest.mock import patch, ANY
-
-import karrio.lib as lib
-
 from . import fixture
+import logging
+import karrio.sdk as karrio
+import karrio.lib as lib
+import karrio.core.models as models
+
+logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropGetOrderDetails(unittest.TestCase):
@@ -78,7 +81,26 @@ class TestRoyalMailClickandDropGetOrderDetails(unittest.TestCase):
                 fixture.ParsedGetOrderDetailsErrorResponse,
             )
 
+    def test_create_get_order_details_request_with_string_reference(self):
+        """Encode string order references as quoted Royal Mail orderIdentifiers for /full lookup."""
+        request = fixture.gateway.mapper.create_get_order_details_request(
+            {"reference": "ORDER-1001"}
+        )
 
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual(
+            request.serialize(),
+            {"orderIdentifiers": "%22ORDER-1001%22"},
+        )
+
+    def test_create_get_order_details_request_with_numeric_reference(self):
+        """Encode numeric-looking order references as quoted Royal Mail orderIdentifiers for /full lookup."""
+        request = fixture.gateway.mapper.create_get_order_details_request(
+            {"reference": "000123"}
+        )
+
+        self.assertEqual(
+            request.serialize(),
+            {"orderIdentifiers": "%22000123%22"},
+        )
+
 

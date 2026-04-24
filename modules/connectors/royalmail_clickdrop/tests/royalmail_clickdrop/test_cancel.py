@@ -111,6 +111,5 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
             serialized,
             {"orderIdentifiers": "%22000123%22"},
         )
-if __name__ == "__main__":
-    unittest.main()
+
 

@@ -10,6 +10,10 @@ import karrio.providers.royalmail_clickdrop.units as provider_units
 
 from . import fixture
 
+import logging
+import karrio.sdk as karrio
+
+logger = logging.getLogger(__name__)
 
 class TestRoyalMailClickandDropServices(unittest.TestCase):
     def setUp(self):
@@ -121,5 +125,3 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertEqual(options.air_number.state, "UKIMS123")
 
 
-if __name__ == "__main__":
-    unittest.main()
