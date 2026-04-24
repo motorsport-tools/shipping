@@ -1,3 +1,5 @@
+# Royal Mail Click & Drop Karrio Extension Notes
+
 ## Endpoint coverage
 
 ### Click & Drop shipping API
@@ -49,20 +51,42 @@ This integration therefore uses Karrio's universal rate-table mixin to support t
 - Order references continue to be supported, including numeric-looking references when the caller explicitly uses the `reference` field.
 - Label retrieval, order lookup, and related follow-up operations still support carrier-generated numeric order identifiers.
 - Cancel requests can explicitly force reference-style encoding for numeric-looking order references via `options.reference` or `options.order_reference`.
+- Standard Karrio `shipping_charges` is accepted and mapped to Royal Mail `shippingCostCharged`.
+- Standard Karrio `email_notification_to` is accepted and mapped to Royal Mail `sendNotificationsTo`.
 - Notification target defaults to the first contact with an available email address in this order: `recipient`, `sender`, `billing`.
-- `receiveEmailNotification` defaults against the resolved notification target rather than always assuming the recipient.
+- `receiveEmailNotification` now respects explicit raw option input first and otherwise falls back to whether the resolved notification target actually has an email address.
 
 ## Customs and multi-piece behavior
 
-- Single-package international shipments may fall back to `payload.customs.commodities` when parcel-level `items` are not supplied.
+- Single-package international shipments will fall back to `payload.customs.commodities` when parcel-level `items` are not supplied.
 - Multi-package shipments no longer duplicate shipment-level customs commodities onto every parcel.
 - For multi-package international shipments, parcel-level `items` should be supplied when parcel-specific customs contents are required.
 - Shipment subtotal calculation supports both object-style commodities and raw dict-style parcel items.
-- When parcel-level items are absent, order-level subtotal calculation may fall back to shipment-level `customs.commodities`.
+- For order-level subtotal and currency resolution, shipment-level `customs.commodities` is preferred when present.
+- Karrio commodity fields are mapped into Royal Mail customs item fields as follows:
+    - `description` / `customs_description` -> `customsDescription`
+    - `description` / `extended_customs_description` -> `extendedCustomsDescription`
+    - `hs_code` / `customs_code` -> `customsCode`
+    - `origin_country` / `origin_country_code` -> `originCountryCode`
+    - `customs.content_type` -> `customsDeclarationCategory`
+- Royal Mail customs declaration categories are normalized to:
+    - `none`
+    - `gift`
+    - `commercialSample`
+    - `documents`
+    - `other`
+    - `returnedGoods`
+    - `saleOfGoods`
+    - `mixedContent`
+
+## Importer behavior
+
+- Importer payloads support both carrier-shaped keys like `country` and normalized Karrio-style keys like `country_code`.
+- When only `country_code` is supplied, the connector resolves it to the Royal Mail importer country name.
 
 ## Dangerous goods behavior
 
-- `dangerous_goods_quantity` supports fractional numeric values and is no longer restricted to integers.
+- `dangerous_goods_quantity` is just an integer but surely it should be more than this (this might be a oversight on the royal mail api)
 
 ## Tracking model
 
