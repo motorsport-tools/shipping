@@ -780,22 +780,11 @@ def resolve_package_format(
     return PackagingType.small_parcel.value
 
 
-def resolve_customs_category(customs) -> typing.Optional[str]:
-    if customs is None:
+def normalize_customs_category(value: typing.Any) -> typing.Optional[str]:
+    if value in [None, ""]:
         return None
 
-    customs_options = getattr(customs, "options", None)
-    raw_value = (
-        provider_utils.get_value(customs, "content_type")
-        or provider_utils.get_value(customs, "contentType")
-        or provider_utils.get_value(customs_options, "customs_declaration_category")
-        or provider_utils.get_value(customs_options, "customsDeclarationCategory")
-    )
-
-    if raw_value in [None, ""]:
-        return None
-
-    normalized = str(raw_value).strip()
+    normalized = str(value).strip()
     mapping = {
         "none": "none",
         "gift": "gift",
@@ -817,3 +806,18 @@ def resolve_customs_category(customs) -> typing.Optional[str]:
     }
 
     return mapping.get(normalized, mapping.get(normalized.lower(), "other"))
+
+
+def resolve_customs_category(customs) -> typing.Optional[str]:
+    if customs is None:
+        return None
+
+    customs_options = getattr(customs, "options", None)
+    raw_value = (
+        provider_utils.get_value(customs, "content_type")
+        or provider_utils.get_value(customs, "contentType")
+        or provider_utils.get_value(customs_options, "customs_declaration_category")
+        or provider_utils.get_value(customs_options, "customsDeclarationCategory")
+    )
+
+    return normalize_customs_category(raw_value)

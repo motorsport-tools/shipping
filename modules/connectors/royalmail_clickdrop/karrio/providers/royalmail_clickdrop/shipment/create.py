@@ -91,11 +91,11 @@ def _is_gb_to_northern_ireland(shipper, recipient) -> bool:
         and _is_northern_ireland(recipient)
     )
 
-def _to_float(value, default=None):
+def _to_int(value, default=None):
     if value in [None, ""]:
         return default
     try:
-        return float(value)
+        return int(value)
     except (TypeError, ValueError):
         return default
 
@@ -124,7 +124,6 @@ def _to_bool(value, default=None):
             return False
 
     return bool(value)
-
 
 def _validate_billing_address(billing, source_label="billing"):
     if not billing:
@@ -402,13 +401,78 @@ def _build_importer_type(importer, options, customs=None):
         ),
     )
 
+def _item_metadata(item) -> dict:
+    metadata = provider_utils.get_value(item, "metadata") or {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _item_value(item, *keys, default=None):
+    metadata = _item_metadata(item)
+    return _value(
+        item,
+        *keys,
+        default=_value(metadata, *keys, default=default),
+    )
+
+
+def _normalize_country_code(value, max_length: int = 3) -> typing.Optional[str]:
+    if value in [None, ""]:
+        return None
+
+    text = str(value).strip()
+    if text == "":
+        return None
+
+    candidate = text.upper()
+    if len(candidate) <= max_length and candidate in getattr(units.Country, "__members__", {}):
+        return candidate
+
+    match = next(
+        (
+            name
+            for name, country in getattr(units.Country, "__members__", {}).items()
+            if str(getattr(country, "value", "")).strip().casefold() == text.casefold()
+        ),
+        None,
+    )
+    if match is not None:
+        return match
+
+    return _text(candidate, max=max_length)
+
+
+def _resolve_sku(item) -> typing.Optional[str]:
+    return _text(
+        _coalesce(
+            _item_value(item, "SKU", "sku"),
+            _item_value(item, "product_id", "productId"),
+            _item_value(item, "variant_id", "variantId"),
+            _item_value(item, "id"),
+        ),
+        max=100,
+    )
+
+
+def _resolve_item_name(item) -> typing.Optional[str]:
+    return _text(
+        _coalesce(
+            _item_value(item, "name"),
+            _item_value(item, "title"),
+            _item_value(item, "description"),
+            _item_value(item, "SKU", "sku"),
+        ),
+        max=800,
+    )
+
+
 def _resolve_customs_description(item) -> typing.Optional[str]:
     return _text(
         _coalesce(
-            _value(item, "customs_description", "customsDescription"),
-            _value(item, "description", "name"),
-            _value(item, "title"),
-            _value(item, "sku"),
+            _item_value(item, "customs_description", "customsDescription"),
+            _item_value(item, "description"),
+            _item_value(item, "name"),
+            _item_value(item, "title"),
+            _item_value(item, "SKU", "sku"),
         ),
         max=50,
     )
@@ -417,11 +481,16 @@ def _resolve_customs_description(item) -> typing.Optional[str]:
 def _resolve_extended_customs_description(item) -> typing.Optional[str]:
     return _text(
         _coalesce(
-            _value(item, "extended_customs_description", "extendedCustomsDescription"),
-            _value(item, "description", "name"),
-            _value(item, "title"),
-            _value(item, "customs_description", "customsDescription"),
-            _value(item, "sku"),
+            _item_value(
+                item,
+                "extended_customs_description",
+                "extendedCustomsDescription",
+            ),
+            _item_value(item, "description"),
+            _item_value(item, "name"),
+            _item_value(item, "title"),
+            _item_value(item, "customs_description", "customsDescription"),
+            _item_value(item, "SKU", "sku"),
         ),
         max=300,
     )
@@ -430,45 +499,63 @@ def _resolve_extended_customs_description(item) -> typing.Optional[str]:
 def _resolve_customs_code(item) -> typing.Optional[str]:
     return _text(
         _coalesce(
-            _value(item, "customs_code", "customsCode"),
-            _value(item, "hs_code", "hsCode"),
-            _value(item, "commodity_code", "commodityCode"),
-            _value(item, "harmonized_code", "harmonizedCode"),
+            _item_value(item, "customs_code", "customsCode"),
+            _item_value(item, "hs_code", "hsCode"),
+            _item_value(item, "commodity_code", "commodityCode"),
+            _item_value(item, "harmonized_code", "harmonizedCode"),
         ),
         max=10,
     )
 
 
 def _resolve_origin_country_code(item) -> typing.Optional[str]:
-    origin = _coalesce(
-        _value(item, "origin_country_code", "originCountryCode"),
-        _value(item, "origin_country", "originCountry"),
-        _value(item, "country_of_origin", "countryOfOrigin"),
+    return _normalize_country_code(
+        _coalesce(
+            _item_value(item, "origin_country_code", "originCountryCode"),
+            _item_value(item, "origin_country", "originCountry"),
+            _item_value(item, "country_of_origin", "countryOfOrigin"),
+        ),
+        max_length=3,
     )
-    if origin in [None, ""]:
-        return None
-
-    return _text(str(origin).strip().upper(), max=3)
 
 
 def _resolve_item_customs_category(item, customs) -> typing.Optional[str]:
-    return _coalesce(
-        _value(item, "customs_declaration_category", "customsDeclarationCategory"),
-        provider_units.resolve_customs_category(customs),
+    return provider_units.normalize_customs_category(
+        _coalesce(
+            _item_value(
+                item,
+                "customs_declaration_category",
+                "customsDeclarationCategory",
+            ),
+            provider_units.resolve_customs_category(customs),
+        )
     )
 
 
-def _build_item(
+def _resolve_unit_value(item) -> typing.Optional[float]:
+    return _to_float(
+        _coalesce(
+            _item_value(item, "unit_value", "unitValue"),
+            _item_value(item, "value_amount", "valueAmount"),
+            _item_value(item, "value"),
+        ),
+        None,
+    )
+
+
+def _resolve_unit_weight_in_grams(
     item,
-    customs,
     default_weight_unit: typing.Optional[str] = None,
-) -> royalmail_clickdrop_req.ContentType:
-    raw_item_weight = _value(item, "weight")
+) -> typing.Optional[int]:
+    direct_value = _to_int(_item_value(item, "unitWeightInGrams"), None)
+    if direct_value is not None:
+        return direct_value
+
+    raw_item_weight = _item_value(item, "weight")
     raw_item_weight_unit = _first_present(
-        _value(item, "weight_unit", "weightUnit"),
+        _item_value(item, "weight_unit", "weightUnit"),
         default_weight_unit,
     )
-
     raw_item_weight_in_grams = (
         provider_units.weight_to_grams(raw_item_weight, raw_item_weight_unit)
         if raw_item_weight is not None and raw_item_weight_unit is not None
@@ -476,29 +563,77 @@ def _build_item(
     )
 
     item_weight = getattr(item, "weight", None) if not isinstance(item, dict) else None
-
-    return royalmail_clickdrop_req.ContentType(
-        customsDescription=_resolve_customs_description(item),
-        extendedCustomsDescription=_resolve_extended_customs_description(item),
-        quantity=_to_int(_coalesce(_value(item, "quantity"), 1), 1),
-        customsValue=_to_float(
-            _coalesce(
-                _value(item, "value_amount", "valueAmount"),
-                _value(item, "value"),
-                0,
-            ),
-            0,
-        ),
-        customsCode=_resolve_customs_code(item),
-        originCountryCode=_resolve_origin_country_code(item),
-        weightInGrams=_coalesce(
-            raw_item_weight_in_grams,
-            provider_units.weight_in_grams(item_weight, default=1),
-            1,
-        ),
-        customsDeclarationCategory=_resolve_item_customs_category(item, customs),
+    return _coalesce(
+        raw_item_weight_in_grams,
+        provider_units.weight_in_grams(item_weight, default=None),
     )
 
+
+def _resolve_requires_export_licence(item) -> typing.Optional[bool]:
+    return _to_bool(
+        _item_value(
+            item,
+            "requires_export_licence",
+            "requiresExportLicence",
+        ),
+        None,
+    )
+
+
+def _resolve_use_origin_preference(item) -> typing.Optional[bool]:
+    return _to_bool(
+        _item_value(
+            item,
+            "use_origin_preference",
+            "useOriginPreference",
+        ),
+        None,
+    )
+
+
+def _resolve_supplementary_units(item) -> typing.Optional[str]:
+    value = _item_value(item, "supplementary_units", "supplementaryUnits")
+    if value in [None, ""]:
+        return None
+
+    return _text(str(value), max=17)
+
+
+def _build_item(
+    item,
+    customs,
+    default_weight_unit: typing.Optional[str] = None,
+) -> royalmail_clickdrop_req.ContentType:
+    return royalmail_clickdrop_req.ContentType(
+        SKU=_resolve_sku(item),
+        name=_resolve_item_name(item),
+        quantity=_to_int(_coalesce(_item_value(item, "quantity"), 1), 1),
+        unitValue=_resolve_unit_value(item),
+        unitWeightInGrams=_resolve_unit_weight_in_grams(
+            item,
+            default_weight_unit=default_weight_unit,
+        ),
+        customsDescription=_resolve_customs_description(item),
+        extendedCustomsDescription=_resolve_extended_customs_description(item),
+        customsCode=_resolve_customs_code(item),
+        originCountryCode=_resolve_origin_country_code(item),
+        customsDeclarationCategory=_resolve_item_customs_category(item, customs),
+        requiresExportLicence=_resolve_requires_export_licence(item),
+        stockLocation=_text(
+            _item_value(item, "stock_location", "stockLocation"),
+            max=50,
+        ),
+        useOriginPreference=_resolve_use_origin_preference(item),
+        supplementaryUnits=_resolve_supplementary_units(item),
+        licenseNumber=_text(
+            _item_value(item, "license_number", "licenseNumber"),
+            max=41,
+        ),
+        certificateNumber=_text(
+            _item_value(item, "certificate_number", "certificateNumber"),
+            max=41,
+        ),
+    )
 def _resolve_special_instructions(options):
     return _text(
         _first_present(
