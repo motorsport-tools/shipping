@@ -8,7 +8,7 @@ import karrio.providers.royalmail_clickdrop.units as units
 
 METADATA = PluginMetadata(
     status="development",
-    id="royalmail_clickdrop",
+    id="royalmail",
     label="Royal Mail Click and Drop",
     description="Royal Mail Click and Drop shipping integration for Karrio",
     Mapper=Mapper,
