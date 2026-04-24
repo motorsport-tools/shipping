@@ -5,7 +5,9 @@ import typing
 from decimal import Decimal
 
 import karrio.core.models as models
+import karrio.core.units as units
 import karrio.lib as lib
+
 import karrio.providers.royalmail_clickdrop.error as error
 import karrio.providers.royalmail_clickdrop.units as provider_units
 import karrio.providers.royalmail_clickdrop.utils as provider_utils
@@ -89,6 +91,14 @@ def _is_gb_to_northern_ireland(shipper, recipient) -> bool:
         and _is_northern_ireland(recipient)
     )
 
+def _to_float(value, default=None):
+    if value in [None, ""]:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 
 def _to_float(value, default=None):
     if value in [None, ""]:
@@ -97,6 +107,23 @@ def _to_float(value, default=None):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _to_bool(value, default=None):
+    if value in [None, ""]:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ["true", "1", "yes", "y"]:
+            return True
+        if normalized in ["false", "0", "no", "n"]:
+            return False
+
+    return bool(value)
 
 
 def _validate_billing_address(billing, source_label="billing"):
@@ -154,8 +181,23 @@ def _billing_email_address(billing) -> typing.Optional[str]:
     )
 
 
-def _resolve_notification_target(options, recipient, shipper, billing) -> typing.Optional[str]:
-    explicit_target = _first_present(options.send_notifications_to.state)
+def _resolve_notification_target(
+    raw_options,
+    options,
+    recipient,
+    shipper,
+    billing,
+) -> typing.Optional[str]:
+    explicit_target = _first_present(
+        _value(
+            raw_options,
+            "send_notifications_to",
+            "sendNotificationsTo",
+            "email_notification_to",
+        ),
+        options.send_notifications_to.state,
+        options.email_notification_to.state,
+    )
     if explicit_target not in [None, ""]:
         return explicit_target
 
@@ -178,6 +220,34 @@ def _notification_target_has_email(target, recipient, shipper, billing) -> bool:
     }
 
     return email_by_target.get(target) not in [None, ""]
+
+
+def _resolve_email_notification(
+    raw_options,
+    notification_target,
+    recipient,
+    shipper,
+    billing,
+) -> bool:
+    explicit = _to_bool(
+        _first_present(
+            _value(
+                raw_options,
+                "receive_email_notification",
+                "receiveEmailNotification",
+                "email_notification",
+            ),
+        )
+    )
+    if explicit is not None:
+        return explicit
+
+    return _notification_target_has_email(
+        notification_target,
+        recipient,
+        shipper,
+        billing,
+    )
 
 def _build_billing_type(billing):
     if billing is None:
@@ -233,6 +303,21 @@ def _has_importer_data(importer, options, customs=None) -> bool:
     )
 
 
+def _resolve_importer_country(importer) -> typing.Optional[str]:
+    country = _value(importer, "country", "country_name")
+    if country not in [None, ""]:
+        return country
+
+    country_code = _value(importer, "countryCode", "country_code")
+    if country_code in [None, ""]:
+        return None
+
+    try:
+        return units.Country.map(country_code).value
+    except Exception:
+        return str(country_code)
+
+
 def _build_importer_type(importer, options, customs=None):
     if not _has_importer_data(importer, options, customs):
         return None
@@ -263,7 +348,7 @@ def _build_importer_type(importer, options, customs=None):
             max=20,
         ),
         country=_text(
-            _value(importer, "country", "country_name"),
+            _resolve_importer_country(importer),
             max=100,
         ),
         businessName=_text(
@@ -317,91 +402,101 @@ def _build_importer_type(importer, options, customs=None):
         ),
     )
 
+def _resolve_customs_description(item) -> typing.Optional[str]:
+    return _text(
+        _coalesce(
+            _value(item, "customs_description", "customsDescription"),
+            _value(item, "description", "name"),
+            _value(item, "title"),
+            _value(item, "sku"),
+        ),
+        max=50,
+    )
+
+
+def _resolve_extended_customs_description(item) -> typing.Optional[str]:
+    return _text(
+        _coalesce(
+            _value(item, "extended_customs_description", "extendedCustomsDescription"),
+            _value(item, "description", "name"),
+            _value(item, "title"),
+            _value(item, "customs_description", "customsDescription"),
+            _value(item, "sku"),
+        ),
+        max=300,
+    )
+
+
+def _resolve_customs_code(item) -> typing.Optional[str]:
+    return _text(
+        _coalesce(
+            _value(item, "customs_code", "customsCode"),
+            _value(item, "hs_code", "hsCode"),
+            _value(item, "commodity_code", "commodityCode"),
+            _value(item, "harmonized_code", "harmonizedCode"),
+        ),
+        max=10,
+    )
+
+
+def _resolve_origin_country_code(item) -> typing.Optional[str]:
+    origin = _coalesce(
+        _value(item, "origin_country_code", "originCountryCode"),
+        _value(item, "origin_country", "originCountry"),
+        _value(item, "country_of_origin", "countryOfOrigin"),
+    )
+    if origin in [None, ""]:
+        return None
+
+    return _text(str(origin).strip().upper(), max=3)
+
+
+def _resolve_item_customs_category(item, customs) -> typing.Optional[str]:
+    return _coalesce(
+        _value(item, "customs_declaration_category", "customsDeclarationCategory"),
+        provider_units.resolve_customs_category(customs),
+    )
+
 
 def _build_item(
     item,
     customs,
-    default_weight_unit=None,
+    default_weight_unit: typing.Optional[str] = None,
 ) -> royalmail_clickdrop_req.ContentType:
-    metadata = provider_utils.get_value(item, "metadata", {}) or {}
-    if not isinstance(metadata, dict):
-        metadata = {}
-
-    item_value = _to_float(
-        _coalesce(
-            provider_utils.get_value(item, "value_amount"),
-            provider_utils.get_value(item, "value"),
-        )
+    raw_item_weight = _value(item, "weight")
+    raw_item_weight_unit = _first_present(
+        _value(item, "weight_unit", "weightUnit"),
+        default_weight_unit,
     )
 
-    raw_item_weight = provider_utils.get_value(item, "weight")
-    raw_item_weight_unit = _value(
-        item,
-        "weight_unit",
-        "weightUnit",
-        default=default_weight_unit,
-    )
-    item_weight_in_grams = (
+    raw_item_weight_in_grams = (
         provider_units.weight_to_grams(raw_item_weight, raw_item_weight_unit)
         if raw_item_weight is not None and raw_item_weight_unit is not None
         else None
     )
 
-    customs_category = (
-        metadata.get("customs_declaration_category")
-        or provider_units.resolve_customs_category(
-            getattr(customs, "content_type", None)
-        )
-        or "saleOfGoods"
-    )
+    item_weight = getattr(item, "weight", None) if not isinstance(item, dict) else None
 
     return royalmail_clickdrop_req.ContentType(
-        SKU=_text(provider_utils.get_value(item, "sku"), max=100),
-        name=_text(
-            provider_utils.get_value(item, "description")
-            or provider_utils.get_value(item, "title")
-            or provider_utils.get_value(item, "name"),
-            max=800,
-        ),
-        quantity=int(float(provider_utils.get_value(item, "quantity", 1) or 1)),
-        unitValue=item_value,
-        unitWeightInGrams=item_weight_in_grams,
-        customsDescription=_text(
-            provider_utils.get_value(item, "description")
-            or provider_utils.get_value(item, "title")
-            or provider_utils.get_value(item, "name"),
-            max=50,
-        ),
-        extendedCustomsDescription=_text(
-            provider_utils.get_value(item, "description"),
-            max=300,
-        ),
-        customsCode=_text(
-            "".join(
-                char
-                for char in str(provider_utils.get_value(item, "hs_code") or "")
-                if char.isalnum()
+        customsDescription=_resolve_customs_description(item),
+        extendedCustomsDescription=_resolve_extended_customs_description(item),
+        quantity=_to_int(_coalesce(_value(item, "quantity"), 1), 1),
+        customsValue=_to_float(
+            _coalesce(
+                _value(item, "value_amount", "valueAmount"),
+                _value(item, "value"),
+                0,
             ),
-            max=10,
+            0,
         ),
-        originCountryCode=_text(provider_utils.get_value(item, "origin_country"), max=3),
-        customsDeclarationCategory=customs_category,
-        requiresExportLicence=_coalesce(
-            metadata.get("requires_export_licence"),
-            metadata.get("requires_export_license"),
+        customsCode=_resolve_customs_code(item),
+        originCountryCode=_resolve_origin_country_code(item),
+        weightInGrams=_coalesce(
+            raw_item_weight_in_grams,
+            provider_units.weight_in_grams(item_weight, default=1),
+            1,
         ),
-        stockLocation=_text(metadata.get("stock_location"), max=50),
-        useOriginPreference=metadata.get("use_origin_preference"),
-        supplementaryUnits=_text(
-            (
-                str(metadata.get("supplementary_units"))
-                if metadata.get("supplementary_units") not in [None, ""]
-                else None
-            ),
-            max=17,
-        ),
-        licenseNumber=_text(metadata.get("license_number"), max=41),
-        certificateNumber=_text(metadata.get("certificate_number"), max=41),
+        customsDeclarationCategory=_resolve_item_customs_category(item, customs),
     )
 
 def _resolve_special_instructions(options):
@@ -423,13 +518,16 @@ def _explicit_package_items(package, raw_package) -> typing.List[typing.Any]:
         or []
     )
 
-
 def _shipment_items(
     packages,
     raw_parcels=None,
     customs=None,
 ) -> typing.List[typing.Any]:
-    explicit_items = [
+    customs_items = list(getattr(customs, "commodities", None) or []) if customs else []
+    if any(customs_items):
+        return customs_items
+
+    return [
         item
         for index, package in enumerate(packages or [])
         for item in _explicit_package_items(
@@ -437,12 +535,6 @@ def _shipment_items(
             raw_parcels[index] if raw_parcels and index < len(raw_parcels) else None,
         )
     ]
-
-    if any(explicit_items):
-        return explicit_items
-
-    return list(getattr(customs, "commodities", None) or []) if customs else []
-
 
 def _resolve_package_items(
     package,
@@ -782,6 +874,7 @@ def shipment_request(
     tags = provider_utils.get_value(raw_options, "tags")
 
     send_notifications_to = _resolve_notification_target(
+        raw_options,
         options,
         recipient,
         shipper,
@@ -897,15 +990,12 @@ def shipment_request(
                     carrierName=_text(carrier_name, max=50),
                     serviceRegisterCode=_text(service_register_code, max=2),
                     consequentialLoss=options.consequential_loss.state,
-                    receiveEmailNotification=_coalesce(
-                        options.receive_email_notification.state,
-                        options.email_notification.state,
-                        _notification_target_has_email(
-                            send_notifications_to,
-                            recipient,
-                            shipper,
-                            billing,
-                        ),
+                    receiveEmailNotification=_resolve_email_notification(
+                        raw_options,
+                        send_notifications_to,
+                        recipient,
+                        shipper,
+                        billing,
                     ),
                     receiveSmsNotification=_coalesce(
                         options.receive_sms_notification.state,

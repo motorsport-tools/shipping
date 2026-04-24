@@ -334,6 +334,12 @@ class ShippingService(lib.StrEnum):
     express48_returns = "RTA"
     tracked_returns_48 = "TSS"
 
+class NotificationTarget(lib.StrEnum):
+    recipient = "recipient"
+    sender = "sender"
+    billing = "billing"
+
+
 
 class ShippingOption(lib.Enum):
     """Royal Mail Click & Drop carrier options."""
@@ -362,7 +368,10 @@ class ShippingOption(lib.Enum):
     tags = lib.OptionEnum("tags", list)
 
     # postage details
-    send_notifications_to = lib.OptionEnum("send_notifications_to")
+    send_notifications_to = lib.OptionEnum(
+        "send_notifications_to",
+        NotificationTarget,
+    )
     carrier_name = lib.OptionEnum("carrier_name")
     service_register_code = lib.OptionEnum("service_register_code")
     consequential_loss = lib.OptionEnum("consequential_loss", int)
@@ -434,7 +443,9 @@ OPTION_ALIASES = {
 
     # standard Karrio shipment option aliases
     "email_notification": "receive_email_notification",
+    "email_notification_to": "send_notifications_to",
     "sms_notification": "receive_sms_notification",
+    "shipping_charges": "shipping_cost_charged",
     "invoice_number": "commercial_invoice_number",
     "invoice_date": "commercial_invoice_date",
     "dangerous_good": "contains_dangerous_goods",
@@ -769,20 +780,40 @@ def resolve_package_format(
     return PackagingType.small_parcel.value
 
 
-def resolve_customs_category(category):
+def resolve_customs_category(customs) -> typing.Optional[str]:
+    if customs is None:
+        return None
+
+    customs_options = getattr(customs, "options", None)
+    raw_value = (
+        provider_utils.get_value(customs, "content_type")
+        or provider_utils.get_value(customs, "contentType")
+        or provider_utils.get_value(customs_options, "customs_declaration_category")
+        or provider_utils.get_value(customs_options, "customsDeclarationCategory")
+    )
+
+    if raw_value in [None, ""]:
+        return None
+
+    normalized = str(raw_value).strip()
     mapping = {
         "none": "none",
-        "documents": "documents",
         "gift": "gift",
-        "merchandise": "saleOfGoods",
-        "sale_of_goods": "saleOfGoods",
-        "commercial_sample": "commercialSample",
         "sample": "commercialSample",
+        "commercial_sample": "commercialSample",
+        "commercialSample": "commercialSample",
+        "documents": "documents",
+        "document": "documents",
+        "other": "other",
         "return_merchandise": "returnedGoods",
         "returned_goods": "returnedGoods",
-        "mixed_content": "mixedContent",
+        "returnedGoods": "returnedGoods",
+        "merchandise": "saleOfGoods",
+        "sale_of_goods": "saleOfGoods",
+        "saleOfGoods": "saleOfGoods",
         "mixed": "mixedContent",
-        "other": "other",
+        "mixed_content": "mixedContent",
+        "mixedContent": "mixedContent",
     }
 
-    return mapping.get(category, "none")
+    return mapping.get(normalized, mapping.get(normalized.lower(), "other"))
