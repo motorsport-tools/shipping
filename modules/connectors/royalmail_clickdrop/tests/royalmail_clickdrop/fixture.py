@@ -13,7 +13,7 @@ import karrio.sdk as karrio
 gateway = karrio.gateway["royalmail_clickdrop"].create(
     {
         "id": "123456789",
-        "carrier_id": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
         "api_key": "CLICKDROP_API_KEY",
         "tracking_client_id": "ROYALMAIL_TRACKING_CLIENT_ID",
         "tracking_client_secret": "ROYALMAIL_TRACKING_CLIENT_SECRET",

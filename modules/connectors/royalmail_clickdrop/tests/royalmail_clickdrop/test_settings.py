@@ -15,7 +15,7 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         self.maxDiff = None
 
     def _gateway(self, config=None):
-        return karrio.gateway["royalmail_clickdrop"].create(
+        return karrio.gateway["royalmail"].create(
             dict(
                 id="123456789",
                 test_mode=False,
