@@ -1,69 +1,92 @@
-# Royal Mail Click & Drop Karrio Extension Notes
-
-## Scope
-This connector bundle implements the Royal Mail Click & Drop public API operations exposed in the provided OpenAPI spec:
-
 ## Endpoint coverage
 
-From the royal mail api specification YAML, these are the public paths:
+### Click & Drop shipping API
 
-| Method | Path | Implemented? | Notes |
-|---|---|---:|---|
-| GET | `/version` | Yes | `proxy.get_version`, `order_query.parse_get_version_response` |
-| GET | `/orders/{orderIdentifiers}` | Yes | get order |
-| DELETE | `/orders/{orderIdentifiers}` | Yes | cancel |
-| PUT | `/orders/status` | Yes | order status |
-| GET | `/orders/{orderIdentifiers}/full` | Yes | get order details |
-| GET | `/orders` | Yes | list orders |
-| POST | `/orders` | Yes | create shipment |
-| GET | `/orders/full` | Yes | list order details |
-| GET | `/orders/{orderIdentifiers}/label` | Yes | label retrieval |
-| POST | `/manifests` | Yes | create manifest |
-| POST | `/manifests/retry/{manifestIdentifier}` | Yes | retry manifest |
-| GET | `/manifests/{manifestIdentifier}` | Yes | get manifest |
-| GET | `/returns/services` | Yes | return services |
-| POST | `/returns` | Yes | create return shipment |
+| Method | Path                                    | Implemented? | Notes                                                          |
+| ------ | --------------------------------------- | -----------: | -------------------------------------------------------------- |
+| GET    | `/version`                              |          Yes | `proxy.get_version`, `orders.query.parse_get_version_response` |
+| GET    | `/orders/{orderIdentifiers}`            |          Yes | Get order                                                      |
+| DELETE | `/orders/{orderIdentifiers}`            |          Yes | Cancel shipment/order                                          |
+| PUT    | `/orders/status`                        |          Yes | Update order status                                            |
+| GET    | `/orders/{orderIdentifiers}/full`       |          Yes | Get order details                                              |
+| GET    | `/orders`                               |          Yes | List orders                                                    |
+| POST   | `/orders`                               |          Yes | Create shipment                                                |
+| GET    | `/orders/full`                          |          Yes | List order details                                             |
+| GET    | `/orders/{orderIdentifiers}/label`      |          Yes | Label retrieval                                                |
+| POST   | `/manifests`                            |          Yes | Create manifest                                                |
+| POST   | `/manifests/retry/{manifestIdentifier}` |          Yes | Retry manifest                                                 |
+| GET    | `/manifests/{manifestIdentifier}`       |          Yes | Get manifest                                                   |
+| GET    | `/returns/services`                     |          Yes | Return services                                                |
+| POST   | `/returns`                              |          Yes | Create return shipment                                         |
 
-endpoint coverage, this is **complete**.
+Click & Drop endpoint coverage is complete for the supplied public specification.
+
+### Royal Mail tracking API
+
+| Method | Path                                     | Implemented? | Notes                                       |
+| ------ | ---------------------------------------- | -----------: | ------------------------------------------- |
+| GET    | `/mailpieces/v2/summary?mailPieceId=...` |          Yes | Bulk summary lookup in chunks of up to 30   |
+| GET    | `/mailpieces/v2/{mailPieceId}/events`    |          Yes | Per-piece event enrichment                  |
+| GET    | `/mailpieces/v2/{mailPieceId}/signature` |          Yes | Proof-of-delivery enrichment when available |
 
 ## Design notes
+
 - Built to follow the Karrio direct-carrier pattern.
 - Uses generated schema models under `karrio/schemas/royalmail_clickdrop/`.
-- Carrier services are loaded from `services.csv`, and the loader ignores blank lines
+- Carrier services are loaded from `services.csv`; blank lines are ignored.
+- Click & Drop credentials and tracking credentials are kept separate.
 - Connection config remains in `units.py`; required credentials remain in `utils.py`.
 
-## Important limitations
-- The provided Royal Mail Click & Drop public API spec does not expose a direct tracking endpoint. (this is a seperate API see below)
-- The spec also does not expose a live rating endpoint in the same way other parcel APIs do like DHL or fedex.
-- The bundle therefore focuses on shipping, returns, manifests, label retrieval, and order-status operations, while still exposing the service catalog for service selection.
-- The provided Royal Mail Click & Drop public API spec yaml lists services that not all accounts use so services.csv is the source for our account services. Anything else is ignored like the examples in the yaml. for example we are intentionally Missing `guaranteedSaturdayDelivery`
-
 ## Rating model
-Royal Mail Click & Drop does not expose live rate endpoints in the provided API.
-This integration uses Karrio's universal rate-table mixin to support the `rating`
-capability from configured carrier service tables.
+
+Royal Mail Click & Drop does not expose live rate endpoints in the supplied public API.  
+This integration therefore uses Karrio's universal rate-table mixin to support the `rating` capability from configured carrier service tables.
+
+## Shipping behavior
+
+- `shipment_date` and `shipping_date` are normalized to `plannedDespatchDate`.
+- `order_date` remains a separate field and is not overwritten by shipment date aliases.
+- Order references continue to be supported, including numeric-looking references when the caller explicitly uses the `reference` field.
+- Label retrieval, order lookup, and related follow-up operations still support carrier-generated numeric order identifiers.
+- Cancel requests can explicitly force reference-style encoding for numeric-looking order references via `options.reference` or `options.order_reference`.
+- Notification target defaults to the first contact with an available email address in this order: `recipient`, `sender`, `billing`.
+- `receiveEmailNotification` defaults against the resolved notification target rather than always assuming the recipient.
+
+## Customs and multi-piece behavior
+
+- Single-package international shipments may fall back to `payload.customs.commodities` when parcel-level `items` are not supplied.
+- Multi-package shipments no longer duplicate shipment-level customs commodities onto every parcel.
+- For multi-package international shipments, parcel-level `items` should be supplied when parcel-specific customs contents are required.
+- Shipment subtotal calculation supports both object-style commodities and raw dict-style parcel items.
+- When parcel-level items are absent, order-level subtotal calculation may fall back to shipment-level `customs.commodities`.
+
+## Dangerous goods behavior
+
+- `dangerous_goods_quantity` supports fractional numeric values and is no longer restricted to integers.
 
 ## Tracking model
+
 Tracking is implemented separately via the Royal Mail tracking API.
 
-| Tracking API feature | Status |
-|---|---|
-| Separate Royal Mail tracking credentials | Yes |
-| Configurable tracking base URL | Yes |
-| `GET /{mailPieceId}/events` | Yes |
-| Multiple tracking numbers in one Karrio request | Yes |
-| Async fan-out across tracking numbers | Yes |
-| Tracking event normalization | Yes |
-| Delivered state inference | Yes |
-| Estimated delivery date | Yes |
-| Tracking API error normalization | Yes |
-| Response without summary | Yes |
-| `GET /{mailPieceId}/signature` | Yes |
-| Proof of delivery merge | Yes |
-| Signatory/recipient name mapping | Yes |
+| Tracking API feature                            | Status | Notes                                                                   |
+| ----------------------------------------------- | ------ | ----------------------------------------------------------------------- |
+| Separate Royal Mail tracking credentials        | Yes    | `tracking_client_id` and `tracking_client_secret` required for tracking |
+| Configurable tracking base URL                  | Yes    | Via connection config                                                   |
+| Bulk summary lookup                             | Yes    | Uses `/summary` in chunks of up to 30 mail pieces                       |
+| Multiple tracking numbers in one Karrio request | Yes    | Sequential summary + per-piece events enrichment                        |
+| Event history normalization                     | Yes    | Maps carrier events to Karrio tracking events                           |
+| Delivered state inference                       | Yes    | Uses POD metadata, event names, and summary status category             |
+| Estimated delivery date                         | Yes    | Exposed when returned by Royal Mail                                     |
+| Tracking API error normalization                | Yes    | Top-level and mail-piece-level error handling                           |
+| `GET /{mailPieceId}/signature`                  | Yes    | Retrieved when available from tracking links or metadata                |
+| Proof of delivery merge                         | Yes    | Signature payload merged into tracking detail                           |
+| Signatory/recipient name mapping                | Yes    | Exposed in `TrackingInfo.customer_name`                                 |
+| Proof-of-delivery image normalization           | Yes    | SVG is base64-encoded; base64 PNG is passed through unchanged           |
 
-Things still to cover
-- signature image retrieval, we retrieve the image but not sure how to pressent this to the user yet
-- use of Royal Mail’s up-to-30 mail piece summary query pattern (bulk tracking)
-- tracking is not currently updating status (to be implemented later want to be sure click and drop status is working correctly first) also not sure if we can set up webhooks or its a manual process to check tracking
-- estimated delivery window
+## Important limitations
+
+- The Click & Drop public API spec does not expose live carrier rating endpoints.
+- The Click & Drop public API and the Royal Mail tracking API use different credentials and base URLs.
+- Tracking enrichment is currently sequential, not async fan-out.
+- For multi-piece international shipments, automatic allocation of shipment-level customs commodities across packages is intentionally not attempted. Provide parcel-level `items` when customs contents differ by parcel.
+- `services.csv` remains the source for account-supported service mapping. Example values present in the YAML but not supported by the account are intentionally not surfaced.
