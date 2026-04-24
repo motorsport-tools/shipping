@@ -61,6 +61,30 @@ def _first_present(*values):
 
     return None
 
+def _resolve_selected_service(payload, options, default=None):
+    requested_services = (
+        getattr(payload, "services", None)
+        or ([payload.service] if getattr(payload, "service", None) else None)
+    )
+    services = lib.to_services(
+        requested_services,
+        provider_units.ShippingService,
+    )
+    service = getattr(services, "first", None)
+
+    return (
+        options.service_code.state
+        or getattr(service, "value_or_key", None)
+        or getattr(service, "name_or_key", None)
+        or payload.service
+        or default
+    )
+
+def _build_customer_reference(reference: typing.Optional[str]):
+    if reference in [None, ""]:
+        return None
+
+    return royalmail_return_req.CustomerReferenceType(reference=reference)
 
 def _build_return_address(address) -> royalmail_return_req.AddressType:
     first_name, last_name = _split_name(address.person_name)
@@ -163,10 +187,10 @@ def return_shipment_request(
         initializer=provider_units.shipping_options_initializer,
     )
 
-    selected_service = (
-        options.service_code.state
-        or payload.service
-        or "tracked_returns_48"
+    selected_service = _resolve_selected_service(
+        payload,
+        options,
+        default="tracked_returns_48",
     )
     service_code = provider_units.resolve_carrier_service(selected_service)
 
@@ -188,12 +212,12 @@ def return_shipment_request(
         shipment=royalmail_return_req.ShipmentType(
             shippingAddress=_build_return_address(shipper),
             returnAddress=_build_return_address(return_address),
-            customerReference=royalmail_return_req.CustomerReferenceType(
-                reference=_first_present(
+            customerReference=_build_customer_reference(
+                _first_present(
                     payload.reference,
                     getattr(payload, "order_id", None),
                     getattr(payload, "id", None),
-                ),
+                )
             ),
         ),
     )

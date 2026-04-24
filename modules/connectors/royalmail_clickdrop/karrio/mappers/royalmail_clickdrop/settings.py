@@ -42,3 +42,5 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
 
         return provider_units.DEFAULT_SERVICES
  
+
+ 

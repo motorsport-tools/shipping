@@ -25,6 +25,7 @@ def order_lookup_request(
     payload: typing.Any,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
+    reference = None if isinstance(payload, (str, int, list, tuple, set)) else provider_utils.get_value(payload, "reference")
     order_identifiers = (
         payload
         if isinstance(payload, (str, int, list, tuple, set))
@@ -32,10 +33,16 @@ def order_lookup_request(
         or provider_utils.get_value(payload, "orderIdentifiers")
         or provider_utils.get_value(payload, "shipment_identifier")
         or provider_utils.get_value(payload, "shipmentIdentifier")
-        or provider_utils.get_value(payload, "reference")
+        or reference
     )
 
-    resolved_order_identifiers = provider_utils.make_order_identifiers(order_identifiers)
+    resolved_order_identifiers = provider_utils.make_order_identifiers(
+        order_identifiers,
+        treat_numeric_as_reference=(
+            reference not in [None, ""]
+            and order_identifiers == reference
+        ),
+    )
 
     if not resolved_order_identifiers:
         raise ValueError(
@@ -47,7 +54,6 @@ def order_lookup_request(
         {"orderIdentifiers": resolved_order_identifiers},
         lambda data: data,
     )
-
 
 def orders_lookup_request(
     payload: typing.Any,

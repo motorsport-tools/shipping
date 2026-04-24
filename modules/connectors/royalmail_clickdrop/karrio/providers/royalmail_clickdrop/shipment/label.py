@@ -8,13 +8,20 @@ import karrio.providers.royalmail_clickdrop.utils as provider_utils
 
 
 def label_request(payload, settings: provider_utils.Settings) -> lib.Serializable:
+    reference = provider_utils.get_value(payload, "reference")
     order_identifiers = (
         provider_utils.get_value(payload, "order_identifiers")
         or provider_utils.get_value(payload, "shipment_identifier")
-        or provider_utils.get_value(payload, "reference")
+        or reference
     )
 
-    resolved_order_identifiers = provider_utils.make_order_identifiers(order_identifiers)
+    resolved_order_identifiers = provider_utils.make_order_identifiers(
+        order_identifiers,
+        treat_numeric_as_reference=(
+            reference not in [None, ""]
+            and order_identifiers == reference
+        ),
+    )
 
     if not resolved_order_identifiers:
         raise ValueError(

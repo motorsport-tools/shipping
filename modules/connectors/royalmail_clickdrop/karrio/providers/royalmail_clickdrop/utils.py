@@ -2,8 +2,8 @@ import base64
 import datetime
 import typing
 from urllib.parse import quote
-import karrio.core.units as units
 
+import karrio.core.units as units
 import karrio.lib as lib
 import karrio.core as core
 
@@ -62,16 +62,15 @@ class Settings(core.Settings):
     @property
     def label_type(self) -> str:
         return self.connection_config.label_type.state or "PDF"
-    
+
     @property
     def default_currency(self) -> typing.Optional[str]:
         if self.account_country_code in SUPPORTED_COUNTRY_CURRENCY:
             return units.CountryCurrency.map(self.account_country_code).value
 
         return "GBP"
-    
-    @property
 
+    @property
     def tracking_server_url(self):
         return (
             self.connection_config.tracking_base_url.state
@@ -91,6 +90,7 @@ class Settings(core.Settings):
             "X-IBM-Client-Secret": self.tracking_client_secret,
             "X-Accept-RMG-Terms": "yes",
         }
+
 
 def clean_payload(value):
     """
@@ -123,31 +123,39 @@ def clean_payload(value):
 
     return value
 
-def _format_order_identifier(value: typing.Any) -> str:
+
+def _format_order_identifier(
+    value: typing.Any,
+    treat_numeric_as_reference: bool = False,
+) -> str:
     """
     Royal Mail orderIdentifiers rules:
     - numeric order identifiers are passed as-is
-    - string order references must be percent-encoded and wrapped in double quotes
+    - order references must be percent-encoded and wrapped in double quotes
 
-    Karrio commonly stores carrier-generated numeric identifiers as strings
-    (for example "12345678"), so digit-only strings must also be treated as
-    numeric order identifiers to keep follow-up operations such as cancel,
-    get-order, get-order-details, and label retrieval working correctly.
+    Karrio commonly stores carrier-generated order identifiers as strings
+    (for example "12345678"), so digit-only strings are still treated as
+    numeric identifiers by default.
+
+    Use `treat_numeric_as_reference=True` when the caller explicitly supplied
+    a Royal Mail order reference, even if that reference only contains digits.
     """
     if value is None:
         return ""
 
-    if isinstance(value, int):
+    if isinstance(value, int) and not treat_numeric_as_reference:
         return str(value)
 
     text = str(value).strip()
     if text == "":
         return ""
 
-    if text.isdigit():
+    if text.isdigit() and not treat_numeric_as_reference:
         return text
 
     return quote(f'"{text}"', safe="")
+
+
 def get_value(obj, name: str, default=None):
     """Return a field from either a dict payload or an object instance."""
     if obj is None:
@@ -176,17 +184,32 @@ def to_datetime_string(value):
     return value
 
 
-def make_order_identifiers(value: typing.Any) -> str:
+def make_order_identifiers(
+    value: typing.Any,
+    treat_numeric_as_reference: bool = False,
+) -> str:
     if isinstance(value, (list, tuple, set)):
-        identifiers = [_format_order_identifier(v) for v in value if v is not None]
+        identifiers = [
+            _format_order_identifier(
+                v,
+                treat_numeric_as_reference=treat_numeric_as_reference,
+            )
+            for v in value
+            if v is not None
+        ]
         identifiers = [v for v in identifiers if v]
         if len(identifiers) > 100:
-            raise ValueError("Royal Mail Click & Drop supports a maximum of 100 order identifiers")
+            raise ValueError(
+                "Royal Mail Click & Drop supports a maximum of 100 order identifiers"
+            )
         return ";".join(identifiers)
 
-    return _format_order_identifier(value)
+    return _format_order_identifier(
+        value,
+        treat_numeric_as_reference=treat_numeric_as_reference,
+    )
 
-# added for later use not finished yet decoding and encoding pdfs
+
 def encode_document(content: bytes) -> str:
     return base64.b64encode(content).decode("utf-8")
 
@@ -198,7 +221,6 @@ def decode_document(content: typing.Optional[str]) -> typing.Optional[bytes]:
     try:
         return base64.b64decode(content)
     except (TypeError, ValueError):
-
         return None
 
 
@@ -210,6 +232,7 @@ def _option_value(option):
         return option.state
 
     return option
+
 
 NO_TRACKING_NUMBER = "no code provided"
 
@@ -232,6 +255,7 @@ def resolve_tracking_number(*values: typing.Any) -> str:
 
     return NO_TRACKING_NUMBER
 
+
 def get_option(options, name: str, default=None):
     if options is None:
         return default
@@ -244,5 +268,6 @@ def get_option(options, name: str, default=None):
         return _option_value(value)
 
     return default
+
 
 SUPPORTED_COUNTRY_CURRENCY = ["GB"]

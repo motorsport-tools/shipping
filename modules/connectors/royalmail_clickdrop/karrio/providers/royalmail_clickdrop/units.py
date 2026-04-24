@@ -391,7 +391,7 @@ class ShippingOption(lib.Enum):
     contains_dangerous_goods = lib.OptionEnum("contains_dangerous_goods", bool)
     dangerous_goods_un_code = lib.OptionEnum("dangerous_goods_un_code")
     dangerous_goods_description = lib.OptionEnum("dangerous_goods_description")
-    dangerous_goods_quantity = lib.OptionEnum("dangerous_goods_quantity", int)
+    dangerous_goods_quantity = lib.OptionEnum("dangerous_goods_quantity", float)
 
     # importer fallbacks
     importer_vat_number = lib.OptionEnum("importer_vat_number")
@@ -399,7 +399,8 @@ class ShippingOption(lib.Enum):
     importer_tax_code = lib.OptionEnum("importer_tax_code")
 
     # unified Karrio aliases
-    shipment_date = order_date
+    shipment_date = planned_despatch_date
+    shipping_date = planned_despatch_date
     signature_confirmation = request_signature_upon_delivery
     dangerous_goods = contains_dangerous_goods
 
@@ -407,6 +408,11 @@ class ShippingOption(lib.Enum):
 OPTION_ALIASES = {
     # legacy / RM-style input keys
     "orderDate": "order_date",
+    "plannedDespatchDate": "planned_despatch_date",
+    "shipmentDate": "planned_despatch_date",
+    "shippingDate": "planned_despatch_date",
+    "shipment_date": "planned_despatch_date",
+    "shipping_date": "planned_despatch_date",
     "shippingCharge": "shipping_cost_charged",
     "customsDutyCosts": "customs_duty_costs",
     "orderTotal": "total",

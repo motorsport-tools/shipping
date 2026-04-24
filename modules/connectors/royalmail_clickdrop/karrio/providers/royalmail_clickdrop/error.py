@@ -42,6 +42,69 @@ def _is_error_item(item: typing.Any) -> bool:
     )
 
 
+def _serialise_fields(fields: typing.Iterable[dict]) -> typing.List[dict]:
+    return [
+        {
+            "field": field.get("fieldName"),
+            "value": field.get("value"),
+        }
+        for field in (fields or [])
+        if isinstance(field, dict) and field.get("fieldName")
+    ]
+
+
+def _field_issue_message(
+    field_name: typing.Optional[str],
+    value: typing.Any = None,
+) -> typing.Optional[str]:
+    if not field_name:
+        return None
+
+    if value in [None, "", [], {}]:
+        return f"field '{field_name}' is required"
+
+    return f"field '{field_name}' has invalid value '{value}'"
+
+
+def _compose_field_message(
+    base_message: typing.Optional[str],
+    field_name: typing.Optional[str] = None,
+    value: typing.Any = None,
+) -> str:
+    issue = _field_issue_message(field_name, value)
+
+    if issue and base_message:
+        return f"{base_message} — {issue}"
+
+    if issue:
+        return issue
+
+    return base_message or ""
+
+
+def _compose_fields_summary_message(
+    base_message: typing.Optional[str],
+    fields: typing.Iterable[dict],
+) -> str:
+    field_names = [
+        field.get("fieldName")
+        for field in (fields or [])
+        if isinstance(field, dict) and field.get("fieldName")
+    ]
+
+    if not any(field_names):
+        return base_message or ""
+
+    visible = field_names[:5]
+    suffix = ", ..." if len(field_names) > 5 else ""
+    summary = ", ".join(visible) + suffix
+
+    if base_message:
+        return f"{base_message} — check required fields: {summary}"
+
+    return f"Check required fields: {summary}"
+
+
 def _parse_generic_error_dict(
     response: dict,
     settings: provider_utils.Settings,
@@ -54,15 +117,8 @@ def _parse_generic_error_dict(
         return []
 
     data = lib.to_object(generic_error.ErrorResponseType, response)
-
-    # Generic endpoint errors do not usually include order-level identifiers,
-    # so we start with parser context from kwargs, such as
-    # `operation="create_return_shipment"`.
     details = {**kwargs}
 
-    # Preserve the carrier-provided top-level `details` field when present.
-    # Royal Mail uses this for extra diagnostic text on some endpoints,
-    # including return shipment creation errors.
     if data.details not in [None, "", [], {}]:
         details["details"] = data.details
 
@@ -74,6 +130,7 @@ def _parse_generic_error_dict(
             details=details,
         )
     ]
+
 
 def _parse_order_error_item(
     item: dict,
@@ -112,6 +169,13 @@ def _parse_order_error_item(
         value=item.get("value"),
     )
 
+    base_message = (
+        item.get("errorMessage")
+        or item.get("message")
+        or item.get("description")
+        or ""
+    )
+
     return [
         _message(
             settings,
@@ -120,11 +184,10 @@ def _parse_order_error_item(
                 if item.get("errorCode") is not None
                 else item.get("code") or "error"
             ),
-            message=(
-                item.get("errorMessage")
-                or item.get("message")
-                or item.get("description")
-                or ""
+            message=_compose_field_message(
+                base_message,
+                item.get("fieldName"),
+                item.get("value"),
             ),
             details=details,
         )
@@ -175,11 +238,13 @@ def _parse_error_collection(
                             if item.get("errorCode") is not None
                             else item.get("code") or "error"
                         ),
-                        message=(
+                        message=_compose_field_message(
                             item.get("errorMessage")
                             or item.get("message")
                             or item.get("description")
-                            or ""
+                            or "",
+                            item.get("fieldName"),
+                            item.get("value"),
                         ),
                         details={**kwargs},
                     )
@@ -232,31 +297,41 @@ def _parse_failed_orders(
                 or item.get("description")
                 or ""
             )
+            fields = [field for field in (item.get("fields") or []) if isinstance(field, dict)]
+            serialised_fields = _serialise_fields(fields)
+
+            summary_details = dict(order_details)
+            if any(serialised_fields):
+                summary_details["fields"] = serialised_fields
+
             messages.append(
                 _message(
                     settings,
                     code=base_code,
-                    message=base_message,
-                    details=order_details,
+                    message=_compose_fields_summary_message(base_message, fields),
+                    details=summary_details,
                 )
             )
 
-            for field in item.get("fields", []) or []:
-                if isinstance(field, dict):
-                    messages.append(
-                        _message(
-                            settings,
-                            code=base_code,
-                            message=base_message,
-                            details={
-                                **order_details,
-                                "field": field.get("fieldName"),
-                                "value": field.get("value"),
-                            },
-                        )
+            for field in fields:
+                field_name = field.get("fieldName")
+                field_value = field.get("value")
+
+                messages.append(
+                    _message(
+                        settings,
+                        code=base_code,
+                        message=_compose_field_message(base_message, field_name, field_value),
+                        details={
+                            **order_details,
+                            "field": field_name,
+                            "value": field_value,
+                        },
                     )
+                )
 
     return messages
+
 
 def parse_tracking_error_response(
     response: dict,
@@ -266,25 +341,51 @@ def parse_tracking_error_response(
     if not isinstance(response, dict):
         return []
 
-    if not any(key in response for key in ["httpCode", "httpMessage"]):
-        return []
+    messages: typing.List[models.Message] = []
 
-    details = dict(kwargs)
+    if any(key in response for key in ["httpCode", "httpMessage"]):
+        details = dict(kwargs)
 
-    if response.get("moreInformation"):
-        details["information"] = response.get("moreInformation")
+        if response.get("moreInformation"):
+            details["information"] = response.get("moreInformation")
 
-    if response.get("errors"):
-        details["errors"] = response.get("errors")
+        if response.get("moreinformation"):
+            details["information"] = response.get("moreinformation")
 
-    return [
-        _message(
-            settings,
-            code=str(response.get("httpCode") or "error"),
-            message=response.get("httpMessage") or "Tracking error",
-            details=details,
+        if response.get("errors"):
+            details["errors"] = response.get("errors")
+
+        messages.append(
+            _message(
+                settings,
+                code=str(response.get("httpCode") or "error"),
+                message=response.get("httpMessage") or "Tracking error",
+                details=details,
+            )
         )
-    ]
+
+    for item in response.get("mailPieces", []) or []:
+        if not isinstance(item, dict) or not isinstance(item.get("error"), dict):
+            continue
+
+        item_error = item.get("error") or {}
+        messages.append(
+            _message(
+                settings,
+                code=item_error.get("errorCode") or str(item.get("status") or "error"),
+                message=item_error.get("errorDescription") or "Tracking error",
+                details={
+                    **kwargs,
+                    "tracking_number": item.get("mailPieceId") or kwargs.get("tracking_number"),
+                    "status": item.get("status"),
+                    "cause": item_error.get("errorCause"),
+                    "resolution": item_error.get("errorResolution"),
+                },
+            )
+        )
+
+    return messages
+
 
 def parse_error_response(
     response: typing.Any,
@@ -348,8 +449,16 @@ def parse_error_response(
             )
         ]
 
-    messages.extend(_parse_generic_error_dict(response, settings, **kwargs))
-    messages.extend(_parse_error_collection(response, settings, context=context, **kwargs))
-    messages.extend(_parse_failed_orders(response, settings, **kwargs))
+    collection_messages = _parse_error_collection(
+        response, settings, context=context, **kwargs
+    )
+    failed_order_messages = _parse_failed_orders(response, settings, **kwargs)
+
+    messages.extend(collection_messages)
+    messages.extend(failed_order_messages)
+
+    # Only fall back to bland generic messages if no richer structure exists.
+    if not any(messages):
+        messages.extend(_parse_generic_error_dict(response, settings, **kwargs))
 
     return [m for m in messages if (m.code or m.message)]

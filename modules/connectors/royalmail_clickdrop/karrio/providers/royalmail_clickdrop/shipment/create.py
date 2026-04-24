@@ -49,6 +49,24 @@ def _option_state(source, name):
     option = getattr(source, name, None) if source is not None else None
     return getattr(option, "state", None)
 
+def _resolve_selected_service(payload, options):
+    requested_services = (
+        getattr(payload, "services", None)
+        or ([payload.service] if getattr(payload, "service", None) else None)
+    )
+    services = lib.to_services(
+        requested_services,
+        provider_units.ShippingService,
+    )
+    service = getattr(services, "first", None)
+
+    return (
+        options.service_code.state
+        or _attr(service, "value_or_key")
+        or _attr(service, "name_or_key")
+        or payload.service
+    )
+
 def _is_northern_ireland(address) -> bool:
     postcode = (
         (
@@ -129,6 +147,37 @@ def _resolve_billing(payload, raw_options):
     _validate_billing_address(resolved, "billing_address")
     return resolved
 
+def _billing_email_address(billing) -> typing.Optional[str]:
+    return _first_present(
+        provider_utils.get_value(billing, "emailAddress"),
+        provider_utils.get_value(billing, "email_address"),
+    )
+
+
+def _resolve_notification_target(options, recipient, shipper, billing) -> typing.Optional[str]:
+    explicit_target = _first_present(options.send_notifications_to.state)
+    if explicit_target not in [None, ""]:
+        return explicit_target
+
+    for target, email in [
+        ("recipient", recipient.email),
+        ("sender", shipper.email),
+        ("billing", _billing_email_address(billing)),
+    ]:
+        if email not in [None, ""]:
+            return target
+
+    return None
+
+
+def _notification_target_has_email(target, recipient, shipper, billing) -> bool:
+    email_by_target = {
+        "recipient": recipient.email,
+        "sender": shipper.email,
+        "billing": _billing_email_address(billing),
+    }
+
+    return email_by_target.get(target) not in [None, ""]
 
 def _build_billing_type(billing):
     if billing is None:
@@ -367,16 +416,49 @@ def _resolve_special_instructions(options):
     )
 
 
-def _resolve_package_items(package, raw_package, customs) -> typing.List[typing.Any]:
-    package_items = list(
-        provider_utils.get_value(raw_package, "items") or package.items or []
+def _explicit_package_items(package, raw_package) -> typing.List[typing.Any]:
+    return list(
+        provider_utils.get_value(raw_package, "items")
+        or getattr(package, "items", None)
+        or []
     )
+
+
+def _shipment_items(
+    packages,
+    raw_parcels=None,
+    customs=None,
+) -> typing.List[typing.Any]:
+    explicit_items = [
+        item
+        for index, package in enumerate(packages or [])
+        for item in _explicit_package_items(
+            package,
+            raw_parcels[index] if raw_parcels and index < len(raw_parcels) else None,
+        )
+    ]
+
+    if any(explicit_items):
+        return explicit_items
+
+    return list(getattr(customs, "commodities", None) or []) if customs else []
+
+
+def _resolve_package_items(
+    package,
+    raw_package,
+    customs,
+    package_count: int = 1,
+) -> typing.List[typing.Any]:
+    package_items = _explicit_package_items(package, raw_package)
 
     if any(package_items):
         return package_items
 
-    return list(getattr(customs, "commodities", None) or []) if customs else []
+    if package_count == 1 and customs:
+        return list(getattr(customs, "commodities", None) or [])
 
+    return []
 
 def _resolve_currency_code(
     payload: models.ShipmentRequest,
@@ -389,15 +471,11 @@ def _resolve_currency_code(
     payment = getattr(payload, "payment", None)
     duty = getattr(customs, "duty", None) if customs else None
 
-    package_items = [
-        item
-        for index, package in enumerate(packages or [])
-        for item in _resolve_package_items(
-            package,
-            raw_parcels[index] if index < len(raw_parcels) else None,
-            customs,
-        )
-    ]
+    package_items = _shipment_items(
+        packages,
+        raw_parcels,
+        customs,
+    )
     item_currency = next(
         (
             _value(item, "value_currency", "valueCurrency", "currencyCode", "currency")
@@ -422,10 +500,16 @@ def _build_package(
     raw_package,
     customs,
     explicit_package_format: typing.Optional[str] = None,
+    package_count: int = 1,
 ) -> royalmail_clickdrop_req.PackageType:
     raw_weight = provider_utils.get_value(raw_package, "weight")
     raw_weight_unit = _value(raw_package, "weight_unit", "weightUnit")
-    package_items = _resolve_package_items(package, raw_package, customs)
+    package_items = _resolve_package_items(
+        package,
+        raw_package,
+        customs,
+        package_count=package_count,
+    )
 
     raw_weight_in_grams = (
         provider_units.weight_to_grams(raw_weight, raw_weight_unit)
@@ -464,19 +548,23 @@ def _build_package(
         ],
     )
 
-
 def _sum_items_value(packages, raw_parcels=None, customs=None) -> float:
     total = Decimal("0.00")
 
-    for index, package in enumerate(packages or []):
-        raw_package = raw_parcels[index] if raw_parcels and index < len(raw_parcels) else None
-
-        for item in _resolve_package_items(package, raw_package, customs):
-            qty = Decimal(str(_attr(item, "quantity", 1) or 1))
-            value = Decimal(
-                str(_coalesce(_attr(item, "value_amount"), _attr(item, "value"), 0))
+    for item in _shipment_items(packages, raw_parcels, customs):
+        qty = Decimal(
+            str(provider_utils.get_value(item, "quantity", 1) or 1)
+        )
+        value = Decimal(
+            str(
+                _coalesce(
+                    provider_utils.get_value(item, "value_amount"),
+                    provider_utils.get_value(item, "value"),
+                    0,
+                )
             )
-            total += qty * value
+        )
+        total += qty * value
 
     return float(total)
 
@@ -630,7 +718,7 @@ def shipment_request(
     )
     customs_options = getattr(customs, "options", None) if customs is not None else None
 
-    selected_service = options.service_code.state or payload.service
+    selected_service = _resolve_selected_service(payload, options)
     service_code = provider_units.resolve_carrier_service(selected_service)
     service_register_code = (
         options.service_register_code.state
@@ -659,8 +747,8 @@ def shipment_request(
     planned_despatch_date = provider_utils.to_datetime_string(
         _first_present(
             options.planned_despatch_date.state,
-            options.shipment_date.state,
-            options.shipping_date.state,
+            provider_utils.get_option(options, "shipment_date"),
+            provider_utils.get_option(options, "shipping_date"),
         )
     )
 
@@ -689,9 +777,15 @@ def shipment_request(
         settings,
     )
 
-    send_notifications_to = _coalesce(
-        options.send_notifications_to.state,
-        "recipient" if recipient.email else None,
+    billing = _resolve_billing(payload, raw_options)
+    importer = provider_utils.get_value(raw_options, "importer")
+    tags = provider_utils.get_value(raw_options, "tags")
+
+    send_notifications_to = _resolve_notification_target(
+        options,
+        recipient,
+        shipper,
+        billing,
     )
     carrier_name = _coalesce(
         options.carrier_name.state,
@@ -710,10 +804,6 @@ def shipment_request(
         )
     )
     special_instructions = _resolve_special_instructions(options)
-
-    billing = _resolve_billing(payload, raw_options)
-    importer = provider_utils.get_value(raw_options, "importer")
-    tags = provider_utils.get_value(raw_options, "tags")
 
     is_recipient_a_business = None
     if (
@@ -778,6 +868,7 @@ def shipment_request(
                         raw_parcels[index] if index < len(raw_parcels) else None,
                         customs,
                         explicit_package_format,
+                        package_count=len(packages),
                     )
                     for index, package in enumerate(packages)
                 ],
@@ -809,7 +900,12 @@ def shipment_request(
                     receiveEmailNotification=_coalesce(
                         options.receive_email_notification.state,
                         options.email_notification.state,
-                        bool(recipient.email),
+                        _notification_target_has_email(
+                            send_notifications_to,
+                            recipient,
+                            shipper,
+                            billing,
+                        ),
                     ),
                     receiveSmsNotification=_coalesce(
                         options.receive_sms_notification.state,

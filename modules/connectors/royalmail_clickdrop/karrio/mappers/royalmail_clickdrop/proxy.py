@@ -49,7 +49,53 @@ def _signature_url(
 
         return None
 
+def _chunks(values: typing.List[str], size: int = 30) -> typing.Iterable[typing.List[str]]:
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
 
+
+def _summary_url(
+    settings: provider_settings.Settings,
+    tracking_numbers: typing.List[str],
+) -> str:
+    query = _normalize_query({"mailPieceId": tracking_numbers})
+    return f"{settings.tracking_server_url}/mailpieces/v2/summary?{query}"
+
+
+def _summary_piece_keys(mail_piece: dict) -> typing.List[str]:
+    summary = (mail_piece or {}).get("summary") or {}
+
+    return [
+        key
+        for key in dict.fromkeys(
+            [
+                (mail_piece or {}).get("mailPieceId"),
+                summary.get("uniqueItemId"),
+                summary.get("oneDBarcode"),
+            ]
+        )
+        if key
+    ]
+
+
+def _events_url(
+    settings: provider_settings.Settings,
+    tracking_number: str,
+    summary_piece: typing.Optional[dict] = None,
+) -> str:
+    links = (summary_piece or {}).get("links") or {}
+    events_link = (links.get("events") or {}).get("href")
+
+    if events_link:
+        if events_link.startswith("http"):
+            return events_link
+
+        return f"{settings.tracking_server_url}{events_link}"
+
+    return f"{settings.tracking_server_url}/mailpieces/v2/{tracking_number}/events"
+
+def _summary_piece_has_error(summary_piece: typing.Optional[dict]) -> bool:
+    return bool((summary_piece or {}).get("error"))
 class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
     settings: provider_settings.Settings
 
@@ -225,28 +271,94 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
             }
         )
 
-    
     def get_tracking(
         self, request: lib.Serializable
     ) -> lib.Deserializable[typing.List[typing.Tuple[str, dict]]]:
         tracking_numbers = request.serialize()
         _trace = self.trace_as("json")
+        results: typing.Dict[str, dict] = {}
 
-        def _fetch_tracking(tracking_number: str) -> typing.Tuple[str, dict]:
+        for chunk in _chunks(tracking_numbers, size=30):
+            summary_response = lib.request(
+                url=_summary_url(self.settings, chunk),
+                trace=_trace,
+                method="GET",
+                headers=self.settings.tracking_headers,
+            )
+
+            if summary_response is None or not any(str(summary_response).strip()):
+                for tracking_number in chunk:
+                    results[tracking_number] = {
+                        "summary": {},
+                        "events": None,
+                        "signature": None,
+                    }
+                continue
+
+            summary_data = lib.to_dict(summary_response)
+
+            if (
+                isinstance(summary_data, dict)
+                and any(key in summary_data for key in ["httpCode", "httpMessage"])
+                and not summary_data.get("mailPieces")
+            ):
+                for tracking_number in chunk:
+                    results[tracking_number] = {
+                        "summary": summary_data,
+                        "events": None,
+                        "signature": None,
+                    }
+                continue
+
+            summary_map = {}
+            for mail_piece in (summary_data or {}).get("mailPieces", []) or []:
+                if not isinstance(mail_piece, dict):
+                    continue
+
+                for key in _summary_piece_keys(mail_piece):
+                    summary_map[key] = mail_piece
+
+            for tracking_number in chunk:
+                summary_piece = summary_map.get(tracking_number)
+
+                results[tracking_number] = {
+                    "summary": (
+                        {"mailPieces": [summary_piece]}
+                        if summary_piece is not None
+                        else {"mailPieces": []}
+                    ),
+                    "events": None,
+                    "signature": None,
+                }
+
+        for tracking_number in tracking_numbers:
+            tracking_data = results.get(tracking_number) or {}
+            summary_payload = tracking_data.get("summary") or {}
+            summary_piece = next(iter(summary_payload.get("mailPieces") or []), None)
+
+            if isinstance(summary_payload, dict) and any(
+                key in summary_payload for key in ["httpCode", "httpMessage"]
+            ):
+                continue
+
+            if _summary_piece_has_error(summary_piece):
+                continue
+
             events_response = lib.request(
-                url=f"{self.settings.tracking_server_url}/mailpieces/v2/{tracking_number}/events",
+                url=_events_url(self.settings, tracking_number, summary_piece),
                 trace=_trace,
                 method="GET",
                 headers=self.settings.tracking_headers,
             )
 
             if events_response is None or not any(str(events_response).strip()):
-                return tracking_number, {}
+                results[tracking_number] = tracking_data
+                continue
 
             events_data = lib.to_dict(events_response)
-            signature_data = None
-            signature_url = _signature_url(self.settings, tracking_number, events_data)
+            tracking_data["events"] = events_data
 
+            signature_url = _signature_url(self.settings, tracking_number, events_data)
             if signature_url is not None:
                 signature_response = lib.request(
                     url=signature_url,
@@ -258,20 +370,19 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
                 if signature_response is not None and any(str(signature_response).strip()):
                     signature_payload = lib.to_dict(signature_response)
 
-                    # only keep successful signature payloads; don't let missing POD
-                    # turn into tracking errors when /events itself succeeded
-                    if isinstance(signature_payload, dict) and signature_payload.get("mailPieces"):
-                        signature_data = signature_payload
+                    if (
+                        isinstance(signature_payload, dict)
+                        and signature_payload.get("mailPieces")
+                    ):
+                        tracking_data["signature"] = signature_payload
 
-            return tracking_number, {
-                "events": events_data,
-                "signature": signature_data,
-            }
-
-        responses = lib.run_asynchronously(_fetch_tracking, tracking_numbers)
+            results[tracking_number] = tracking_data
 
         return lib.Deserializable(
-            responses,
+            [
+                (tracking_number, results.get(tracking_number, {}))
+                for tracking_number in tracking_numbers
+            ],
             lambda pairs: [
                 (tracking_number, response)
                 for tracking_number, response in pairs

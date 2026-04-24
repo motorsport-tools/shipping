@@ -8,8 +8,20 @@ import karrio.providers.royalmail_clickdrop.utils as provider_utils
 import karrio.schemas.royalmail_clickdrop.cancel_response as cancel_res
 
 
-def _extract_order_identifiers(payload: models.ShipmentCancelRequest):
-    return payload.shipment_identifier
+def _extract_order_identifiers(
+    payload: models.ShipmentCancelRequest,
+) -> typing.Tuple[typing.Any, bool]:
+    options = getattr(payload, "options", None) or {}
+    reference = (
+        provider_utils.get_value(options, "reference")
+        or provider_utils.get_value(options, "order_reference")
+    )
+    order_identifiers = reference or payload.shipment_identifier
+
+    return (
+        order_identifiers,
+        reference not in [None, ""],
+    )
 
 
 def parse_shipment_cancel_response(
@@ -46,8 +58,10 @@ def shipment_cancel_request(
     payload: models.ShipmentCancelRequest,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
+    order_identifiers, treat_numeric_as_reference = _extract_order_identifiers(payload)
     order_identifiers = provider_utils.make_order_identifiers(
-        _extract_order_identifiers(payload)
+        order_identifiers,
+        treat_numeric_as_reference=treat_numeric_as_reference,
     )
 
     if not order_identifiers:
