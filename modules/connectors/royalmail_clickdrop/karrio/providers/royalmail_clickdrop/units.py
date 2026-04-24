@@ -784,7 +784,10 @@ def normalize_customs_category(value: typing.Any) -> typing.Optional[str]:
     if value in [None, ""]:
         return None
 
-    normalized = str(value).strip()
+    raw_value = str(value).strip()
+    normalized = raw_value.replace("-", "_").replace(" ", "_")
+    lower_normalized = normalized.lower()
+
     mapping = {
         "none": "none",
         "gift": "gift",
@@ -805,8 +808,10 @@ def normalize_customs_category(value: typing.Any) -> typing.Optional[str]:
         "mixedContent": "mixedContent",
     }
 
-    return mapping.get(normalized, mapping.get(normalized.lower(), "other"))
-
+    return mapping.get(
+        raw_value,
+        mapping.get(normalized, mapping.get(lower_normalized, "other")),
+    )
 
 def resolve_customs_category(customs) -> typing.Optional[str]:
     if customs is None:

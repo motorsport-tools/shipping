@@ -2,7 +2,7 @@
 
 import datetime
 import typing
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import karrio.core.models as models
 import karrio.core.units as units
@@ -100,13 +100,72 @@ def _to_int(value, default=None):
         return default
 
 
-def _to_float(value, default=None):
+def _to_decimal(value, default=None) -> typing.Optional[Decimal]:
     if value in [None, ""]:
         return default
+
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        return Decimal(str(value))
+    except Exception:
         return default
+
+
+def _to_float(value, default=None):
+    decimal_value = _to_decimal(value, None)
+    if decimal_value is None:
+        return default
+
+    return float(decimal_value)
+
+
+def _quantize_money(
+    value,
+    field: str,
+    default=None,
+    minimum: typing.Optional[Decimal] = Decimal("0.00"),
+    maximum: typing.Optional[Decimal] = Decimal("999999.00"),
+) -> typing.Optional[float]:
+    amount = _to_decimal(value, None)
+    if amount is None:
+        return default
+
+    amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if minimum is not None and amount < minimum:
+        raise ValueError(
+            f"Royal Mail Click & Drop `{field}` must be greater than or equal to {minimum}."
+        )
+
+    if maximum is not None and amount > maximum:
+        raise ValueError(
+            f"Royal Mail Click & Drop `{field}` must be less than or equal to {maximum}."
+        )
+
+    return float(amount)
+
+
+def _bounded_int(
+    value,
+    field: str,
+    default=None,
+    minimum: typing.Optional[int] = None,
+    maximum: typing.Optional[int] = None,
+) -> typing.Optional[int]:
+    number = _to_int(value, default)
+    if number is None:
+        return default
+
+    if minimum is not None and number < minimum:
+        raise ValueError(
+            f"Royal Mail Click & Drop `{field}` must be greater than or equal to {minimum}."
+        )
+
+    if maximum is not None and number > maximum:
+        raise ValueError(
+            f"Royal Mail Click & Drop `{field}` must be less than or equal to {maximum}."
+        )
+
+    return number
 
 
 def _to_bool(value, default=None):
@@ -423,22 +482,12 @@ def _normalize_country_code(value, max_length: int = 3) -> typing.Optional[str]:
     if text == "":
         return None
 
-    candidate = text.upper()
-    if len(candidate) <= max_length and candidate in getattr(units.Country, "__members__", {}):
-        return candidate
+    for candidate in [text, text.upper()]:
+        mapped = units.Country.map(candidate)
+        if getattr(mapped, "enum", None) is not None:
+            return mapped.name
 
-    match = next(
-        (
-            name
-            for name, country in getattr(units.Country, "__members__", {}).items()
-            if str(getattr(country, "value", "")).strip().casefold() == text.casefold()
-        ),
-        None,
-    )
-    if match is not None:
-        return match
-
-    return _text(candidate, max=max_length)
+    return None
 
 
 def _resolve_sku(item) -> typing.Optional[str]:
@@ -459,7 +508,6 @@ def _resolve_item_name(item) -> typing.Optional[str]:
             _item_value(item, "name"),
             _item_value(item, "title"),
             _item_value(item, "description"),
-            _item_value(item, "SKU", "sku"),
         ),
         max=800,
     )
@@ -472,11 +520,9 @@ def _resolve_customs_description(item) -> typing.Optional[str]:
             _item_value(item, "description"),
             _item_value(item, "name"),
             _item_value(item, "title"),
-            _item_value(item, "SKU", "sku"),
         ),
         max=50,
     )
-
 
 def _resolve_extended_customs_description(item) -> typing.Optional[str]:
     return _text(
@@ -490,7 +536,6 @@ def _resolve_extended_customs_description(item) -> typing.Optional[str]:
             _item_value(item, "name"),
             _item_value(item, "title"),
             _item_value(item, "customs_description", "customsDescription"),
-            _item_value(item, "SKU", "sku"),
         ),
         max=300,
     )
@@ -533,13 +578,16 @@ def _resolve_item_customs_category(item, customs) -> typing.Optional[str]:
 
 
 def _resolve_unit_value(item) -> typing.Optional[float]:
-    return _to_float(
+    return _quantize_money(
         _coalesce(
             _item_value(item, "unit_value", "unitValue"),
             _item_value(item, "value_amount", "valueAmount"),
             _item_value(item, "value"),
         ),
-        None,
+        field="unitValue",
+        default=None,
+        minimum=Decimal("0.00"),
+        maximum=Decimal("999999.00"),
     )
 
 
@@ -547,7 +595,13 @@ def _resolve_unit_weight_in_grams(
     item,
     default_weight_unit: typing.Optional[str] = None,
 ) -> typing.Optional[int]:
-    direct_value = _to_int(_item_value(item, "unitWeightInGrams"), None)
+    direct_value = _bounded_int(
+        _item_value(item, "unitWeightInGrams"),
+        field="unitWeightInGrams",
+        default=None,
+        minimum=0,
+        maximum=999999,
+    )
     if direct_value is not None:
         return direct_value
 
@@ -563,9 +617,15 @@ def _resolve_unit_weight_in_grams(
     )
 
     item_weight = getattr(item, "weight", None) if not isinstance(item, dict) else None
-    return _coalesce(
-        raw_item_weight_in_grams,
-        provider_units.weight_in_grams(item_weight, default=None),
+    return _bounded_int(
+        _coalesce(
+            raw_item_weight_in_grams,
+            provider_units.weight_in_grams(item_weight, default=None),
+        ),
+        field="unitWeightInGrams",
+        default=None,
+        minimum=0,
+        maximum=999999,
     )
 
 
@@ -598,7 +658,6 @@ def _resolve_supplementary_units(item) -> typing.Optional[str]:
 
     return _text(str(value), max=17)
 
-
 def _build_item(
     item,
     customs,
@@ -607,7 +666,13 @@ def _build_item(
     return royalmail_clickdrop_req.ContentType(
         SKU=_resolve_sku(item),
         name=_resolve_item_name(item),
-        quantity=_to_int(_coalesce(_item_value(item, "quantity"), 1), 1),
+        quantity=_bounded_int(
+            _coalesce(_item_value(item, "quantity"), 1),
+            field="quantity",
+            default=1,
+            minimum=1,
+            maximum=999999,
+        ),
         unitValue=_resolve_unit_value(item),
         unitWeightInGrams=_resolve_unit_weight_in_grams(
             item,
@@ -634,6 +699,7 @@ def _build_item(
             max=41,
         ),
     )
+
 def _resolve_special_instructions(options):
     return _text(
         _first_present(
@@ -750,10 +816,16 @@ def _build_package(
     )
 
     return royalmail_clickdrop_req.PackageType(
-        weightInGrams=_coalesce(
-            raw_weight_in_grams,
-            provider_units.weight_in_grams(package.weight, default=1),
-            1,
+        weightInGrams=_bounded_int(
+            _coalesce(
+                raw_weight_in_grams,
+                provider_units.weight_in_grams(package.weight, default=1),
+                1,
+            ),
+            field="weightInGrams",
+            default=1,
+            minimum=1,
+            maximum=30000,
         ),
         packageFormatIdentifier=provider_units.resolve_package_format(
             package=package,
@@ -775,25 +847,41 @@ def _build_package(
         ],
     )
 
-def _sum_items_value(packages, raw_parcels=None, customs=None) -> float:
+def _sum_items_value(packages, raw_parcels=None, customs=None) -> typing.Optional[float]:
     total = Decimal("0.00")
+    has_items = False
 
     for item in _shipment_items(packages, raw_parcels, customs):
+        has_items = True
         qty = Decimal(
-            str(provider_utils.get_value(item, "quantity", 1) or 1)
-        )
-        value = Decimal(
             str(
-                _coalesce(
-                    provider_utils.get_value(item, "value_amount"),
-                    provider_utils.get_value(item, "value"),
-                    0,
+                _bounded_int(
+                    _item_value(item, "quantity"),
+                    field="quantity",
+                    default=1,
+                    minimum=1,
+                    maximum=999999,
                 )
             )
         )
+        value = _to_decimal(
+            _coalesce(
+                _item_value(item, "unit_value", "unitValue"),
+                _item_value(item, "value_amount", "valueAmount"),
+                _item_value(item, "value"),
+            ),
+            None,
+        )
+
+        if value is None:
+            return None
+
         total += qty * value
 
-    return float(total)
+    if not has_items:
+        return None
+
+    return float(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 def parse_shipment_response(
     _response: lib.Deserializable[dict],
@@ -987,13 +1075,22 @@ def shipment_request(
     other_costs = options.other_costs.state
     order_tax = _coalesce(options.order_tax.state, 0.0)
     customs_duty = options.customs_duty_costs.state
+    serialized_customs_duty = (
+        customs_duty
+        if customs is not None and getattr(customs, "incoterm", None) == "DDP"
+        else None
+    )
     total = _coalesce(
         options.total.state,
-        float(subtotal or 0.0)
-        + float(shipping_cost or 0.0)
-        + float(order_tax or 0.0)
-        + float(other_costs or 0.0)
-        + float(customs_duty or 0.0),
+        (
+            float(subtotal)
+            + float(shipping_cost or 0.0)
+            + float(order_tax or 0.0)
+            + float(other_costs or 0.0)
+            + float(serialized_customs_duty or 0.0)
+        )
+        if subtotal is not None
+        else None,
     )
     currency = _resolve_currency_code(
         payload,
@@ -1103,21 +1200,49 @@ def shipment_request(
                 orderDate=order_date,
                 plannedDespatchDate=planned_despatch_date,
                 specialInstructions=special_instructions,
-                subtotal=_to_float(subtotal, 0.0),
-                shippingCostCharged=_to_float(shipping_cost, 0.0),
+                subtotal=_quantize_money(
+                    subtotal,
+                    field="subtotal",
+                    default=None,
+                    minimum=Decimal("0.00"),
+                    maximum=Decimal("999999.00"),
+                ),
+                shippingCostCharged=_quantize_money(
+                    shipping_cost,
+                    field="shippingCostCharged",
+                    default=0.0,
+                    minimum=Decimal("0.00"),
+                    maximum=Decimal("999999.00"),
+                ),
                 otherCosts=(
-                    _to_float(other_costs)
+                    _quantize_money(
+                        other_costs,
+                        field="otherCosts",
+                        default=None,
+                        minimum=Decimal("0.00"),
+                        maximum=Decimal("999999.00"),
+                    )
                     if other_costs is not None
                     else None
                 ),
                 customsDutyCosts=(
-                    _to_float(customs_duty)
-                    if customs is not None
-                    and getattr(customs, "incoterm", None) == "DDP"
-                    and customs_duty is not None
+                    _quantize_money(
+                        serialized_customs_duty,
+                        field="customsDutyCosts",
+                        default=None,
+                        minimum=Decimal("0.00"),
+                        maximum=Decimal("99999.99"),
+                    )
+                    if serialized_customs_duty is not None
                     else None
                 ),
-                total=_to_float(total, 0.0),
+                total=_quantize_money(
+                    total,
+                    field="total",
+                    default=None,
+                    minimum=Decimal("0.00"),
+                    maximum=Decimal("999999.00"),
+                ),
                 currencyCode=currency,
                 postageDetails=royalmail_clickdrop_req.PostageDetailsType(
                     sendNotificationsTo=send_notifications_to,
@@ -1185,7 +1310,13 @@ def shipment_request(
                     includeCN=include_cn,
                     includeReturnsLabel=include_returns_label,
                 ),
-                orderTax=_to_float(order_tax, 0.0),
+                orderTax=_quantize_money(
+                    order_tax,
+                    field="orderTax",
+                    default=0.0,
+                    minimum=Decimal("0.00"),
+                    maximum=Decimal("999999.00"),
+                ),
                 containsDangerousGoods=_coalesce(
                     options.contains_dangerous_goods.state,
                     options.dangerous_good.state,
