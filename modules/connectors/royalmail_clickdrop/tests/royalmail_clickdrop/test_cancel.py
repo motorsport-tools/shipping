@@ -98,6 +98,19 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
             self.assertEqual(len(parsed[1]), 2)
             self.assertEqual(parsed[1][0].code, "NotFound")
             self.assertEqual(parsed[1][1].code, "Forbidden")
+
+    def test_create_cancel_shipment_request_with_numeric_reference_override(self):
+        """Allow explicit numeric order references to be quoted via options.reference."""
+        request = models.ShipmentCancelRequest(
+            shipment_identifier="000123",
+            options={"reference": "000123"},
+        )
+        serialized = fixture.gateway.mapper.create_cancel_shipment_request(request).serialize()
+
+        self.assertEqual(
+            serialized,
+            {"orderIdentifiers": "%22000123%22"},
+        )
 if __name__ == "__main__":
     unittest.main()
 

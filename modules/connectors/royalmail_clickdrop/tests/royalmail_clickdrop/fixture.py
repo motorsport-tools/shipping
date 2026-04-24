@@ -33,6 +33,131 @@ TrackingPayload = {
 
 TrackingRequestJSON = ["090367574000000FE1E1B"]
 
+TrackingPayloadMulti = {
+    "tracking_numbers": ["090367574000000FE1E1B", "ZZ000000000GB"],
+}
+
+
+TrackingSummaryResponseJSON = """{
+  "mailPieces": [
+    {
+      "mailPieceId": "090367574000000FE1E1B",
+      "status": "200",
+      "carrierShortName": "RM",
+      "carrierFullName": "Royal Mail Group Ltd",
+      "summary": {
+        "uniqueItemId": "090367574000000FE1E1B",
+        "oneDBarcode": "FQ087430672GB",
+        "productId": "SD2",
+        "productName": "Special Delivery Guaranteed",
+        "productDescription": "Our guaranteed next working day service with tracking and a signature on delivery",
+        "productCategory": "NON-INTERNATIONAL",
+        "destinationCountryCode": "GBR",
+        "destinationCountryName": "United Kingdom of Great Britain and Northern Ireland",
+        "originCountryCode": "GBR",
+        "originCountryName": "United Kingdom of Great Britain and Northern Ireland",
+        "lastEventCode": "EVNMI",
+        "lastEventName": "Forwarded - Mis-sort",
+        "lastEventDateTime": "2016-10-20T10:04:00+0000",
+        "lastEventLocationName": "Stafford DO",
+        "statusDescription": "It's being redirected",
+        "statusCategory": "IN TRANSIT",
+        "statusHelpText": "The item is in transit and a confirmation will be provided on delivery.",
+        "summaryLine": "Item FQ087430672GB was forwarded to the Delivery Office on 2016-10-20."
+      },
+      "links": {
+        "events": {
+          "href": "/mailpieces/v2/090367574000000FE1E1B/events",
+          "title": "Events",
+          "description": "Get events"
+        }
+      }
+    }
+  ]
+}"""
+
+
+TrackingSummaryResponseWithProofOfDeliveryJSON = """{
+  "mailPieces": [
+    {
+      "mailPieceId": "090367574000000FE1E1B",
+      "status": "200",
+      "carrierShortName": "RM",
+      "carrierFullName": "Royal Mail Group Ltd",
+      "summary": {
+        "uniqueItemId": "090367574000000FE1E1B",
+        "oneDBarcode": "FQ087430672GB",
+        "productId": "SD2",
+        "productName": "Special Delivery Guaranteed",
+        "productDescription": "Our guaranteed next working day service with tracking and a signature on delivery",
+        "productCategory": "NON-INTERNATIONAL",
+        "lastEventCode": "DELIVERED",
+        "lastEventName": "Delivered",
+        "lastEventDateTime": "2017-03-30T16:15:00+0000",
+        "lastEventLocationName": "Stafford DO",
+        "statusDescription": "Delivered",
+        "statusCategory": "DELIVERED",
+        "summaryLine": "Item was delivered."
+      },
+      "links": {
+        "events": {
+          "href": "/mailpieces/v2/090367574000000FE1E1B/events",
+          "title": "Events",
+          "description": "Get events"
+        }
+      }
+    }
+  ]
+}"""
+
+
+TrackingSummaryPartialResponseJSON = """{
+  "mailPieces": [
+    {
+      "mailPieceId": "090367574000000FE1E1B",
+      "status": "200",
+      "carrierShortName": "RM",
+      "carrierFullName": "Royal Mail Group Ltd",
+      "summary": {
+        "uniqueItemId": "090367574000000FE1E1B",
+        "oneDBarcode": "FQ087430672GB",
+        "productId": "SD2",
+        "productName": "Special Delivery Guaranteed",
+        "productDescription": "Our guaranteed next working day service with tracking and a signature on delivery",
+        "productCategory": "NON-INTERNATIONAL",
+        "destinationCountryCode": "GBR",
+        "destinationCountryName": "United Kingdom of Great Britain and Northern Ireland",
+        "originCountryCode": "GBR",
+        "originCountryName": "United Kingdom of Great Britain and Northern Ireland",
+        "lastEventCode": "EVNMI",
+        "lastEventName": "Forwarded - Mis-sort",
+        "lastEventDateTime": "2016-10-20T10:04:00+0000",
+        "lastEventLocationName": "Stafford DO",
+        "statusDescription": "It's being redirected",
+        "statusCategory": "IN TRANSIT",
+        "statusHelpText": "The item is in transit and a confirmation will be provided on delivery.",
+        "summaryLine": "Item FQ087430672GB was forwarded to the Delivery Office on 2016-10-20."
+      },
+      "links": {
+        "events": {
+          "href": "/mailpieces/v2/090367574000000FE1E1B/events",
+          "title": "Events",
+          "description": "Get events"
+        }
+      }
+    },
+    {
+      "mailPieceId": "ZZ000000000GB",
+      "status": "404",
+      "error": {
+        "errorCode": "E2001",
+        "errorDescription": "Tracking number not found",
+        "errorCause": "The barcode reference isn't recognised",
+        "errorResolution": "Please check the tracking number and resubmit"
+      }
+    }
+  ]
+}"""
 
 TrackingResponseJSON = """{
   "mailPieces": {
@@ -179,6 +304,42 @@ ParsedTrackingErrorResponse = [
     ],
 ]
 
+ParsedTrackingSummaryPartialResponse = [
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "tracking_number": "090367574000000FE1E1B",
+            "delivered": False,
+            "events": [
+                {
+                    "code": "EVNMI",
+                    "date": "2016-10-20",
+                    "description": "Forwarded - Mis-sort",
+                    "location": "Stafford DO",
+                    "reason": "carrier_sorting_error",
+                    "time": "10:04 AM",
+                    "timestamp": "2016-10-20T10:04:00.000Z",
+                }
+            ],
+        }
+    ],
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "E2001",
+            "message": "Tracking number not found",
+            "details": {
+                "tracking_number": "ZZ000000000GB",
+                "status": "404",
+                "cause": "The barcode reference isn't recognised",
+                "resolution": "Please check the tracking number and resubmit",
+            },
+        }
+    ],
+]
+
 TrackingResponseWithProofOfDeliveryJSON = """{
   "mailPieces": {
     "mailPieceId": "090367574000000FE1E1B",
@@ -283,11 +444,24 @@ ParsedTrackingResponseWithProofOfDelivery = [
             "info": {
                 "customer_name": "Simon",
             },
+            "images": {
+                "signature_image": "PHN2ZyBoZWlnaHQ9IjUzMCIgd2lkdGg9IjY2MCI+PC9zdmc+",
+            },
+            "meta": {
+                "proof_of_delivery": {
+                    "type": "signature",
+                    "image_format": "image/svg+xml",
+                    "image_id": "001234",
+                    "recipient_name": "Simon",
+                    "signed_at": "2017-03-30T16:15:00+0000",
+                    "base64": "PHN2ZyBoZWlnaHQ9IjUzMCIgd2lkdGg9IjY2MCI+PC9zdmc+",
+                    "data_uri": "data:image/svg+xml;base64,PHN2ZyBoZWlnaHQ9IjUzMCIgd2lkdGg9IjY2MCI+PC9zdmc+",
+                }
+            },
         }
     ],
     [],
 ]
-
 # ---------------------------------------------------------------------------
 # Shipment payload catalog
 # ---------------------------------------------------------------------------
@@ -435,6 +609,21 @@ ShipmentPayloadWithoutItemValueWeight["parcels"][0]["items"] = [
 
 ShipmentPayloadInvalidService = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInvalidService["service"] = "not_a_service"
+
+ShipmentPayloadWithRawServiceCode = copy.deepcopy(ShipmentPayloadWithoutBilling)
+ShipmentPayloadWithRawServiceCode["service"] = "CRL24"
+
+ShipmentRequestWithRawServiceCode = copy.deepcopy(ShipmentRequest)
+ShipmentRequestWithRawServiceCode["items"][0]["postageDetails"]["serviceCode"] = "CRL24"
+ShipmentRequestWithRawServiceCode["items"][0]["postageDetails"]["serviceRegisterCode"] = "01"
+
+ShipmentPayloadWithServiceOptionOverride = copy.deepcopy(ShipmentPayloadWithoutBilling)
+ShipmentPayloadWithServiceOptionOverride["service"] = "tracked_24"
+ShipmentPayloadWithServiceOptionOverride["options"]["service_code"] = "CRL24"
+
+ShipmentRequestWithServiceOptionOverride = copy.deepcopy(ShipmentRequest)
+ShipmentRequestWithServiceOptionOverride["items"][0]["postageDetails"]["serviceCode"] = "CRL24"
+ShipmentRequestWithServiceOptionOverride["items"][0]["postageDetails"]["serviceRegisterCode"] = "01"
 
 ShipmentPayloadInternational = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInternational["recipient"].update(
@@ -916,6 +1105,35 @@ ShipmentNestedErrorsResponse = {
     ]
 }
 
+ShipmentFailedOrdersValidationResponse = {
+    "successCount": 0,
+    "errorsCount": 1,
+    "createdOrders": [],
+    "failedOrders": [
+        {
+            "order": {
+                "orderReference": "ORDER-1001",
+            },
+            "errors": [
+                {
+                    "errorCode": 1001,
+                    "errorMessage": "Validation failed",
+                    "fields": [
+                        {
+                            "fieldName": "recipient.address.postcode",
+                            "value": "",
+                        },
+                        {
+                            "fieldName": "packages[0].weightInGrams",
+                            "value": None,
+                        },
+                    ],
+                }
+            ],
+        }
+    ],
+}
+
 ParsedShipmentResponse = [
     {
         "carrier_id": "royalmail_clickdrop",
@@ -955,6 +1173,50 @@ ParsedShipmentErrorResponse = [
                 "details": "One or more validation errors occurred",
             },
         }
+    ],
+]
+
+ParsedShipmentFailedOrdersValidationResponse = [
+    None,
+    [
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "1001",
+            "message": "Validation failed — check required fields: recipient.address.postcode, packages[0].weightInGrams",
+            "details": {
+                "operation": "create_shipment",
+                "order_reference": "ORDER-1001",
+                "fields": [
+                    {"field": "recipient.address.postcode", "value": ""},
+                    {"field": "packages[0].weightInGrams", "value": None},
+                ],
+            },
+        },
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "1001",
+            "message": "Validation failed — field 'recipient.address.postcode' is required",
+            "details": {
+                "operation": "create_shipment",
+                "order_reference": "ORDER-1001",
+                "field": "recipient.address.postcode",
+                "value": "",
+            },
+        },
+        {
+            "carrier_id": "royalmail_clickdrop",
+            "carrier_name": "royalmail_clickdrop",
+            "code": "1001",
+            "message": "Validation failed — field 'packages[0].weightInGrams' is required",
+            "details": {
+                "operation": "create_shipment",
+                "order_reference": "ORDER-1001",
+                "field": "packages[0].weightInGrams",
+                "value": None,
+            },
+        },
     ],
 ]
 
@@ -1430,6 +1692,15 @@ ReturnShipmentPayloadWithReturnAddress["return_address"] = {
 ReturnShipmentPayloadWithOrderId = copy.deepcopy(ReturnShipmentPayload)
 ReturnShipmentPayloadWithOrderId["reference"] = ""
 ReturnShipmentPayloadWithOrderId["order_id"] = "ORDER-ID-RET-1001"
+
+ReturnShipmentPayloadRawServiceCode = copy.deepcopy(ReturnShipmentPayload)
+ReturnShipmentPayloadRawServiceCode["service"] = "TSS"
+
+ReturnShipmentPayloadWithServiceOptionOverride = copy.deepcopy(ReturnShipmentPayload)
+ReturnShipmentPayloadWithServiceOptionOverride["service"] = "tracked_24"
+ReturnShipmentPayloadWithServiceOptionOverride["options"] = {"service_code": "TSS"}
+
+ReturnShipmentRequestWithServiceOptionOverride = copy.deepcopy(ReturnShipmentRequest)
 
 ReturnShipmentRequest = {
     "service": {"serviceCode": "TSS"},

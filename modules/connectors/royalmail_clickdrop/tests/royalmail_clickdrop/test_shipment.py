@@ -41,6 +41,36 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
                 f"{fixture.gateway.settings.server_url}/orders",
             )
 
+    def test_parse_failed_order_validation_errors(self):
+        """Promote failed-order field validation errors into user-friendly Karrio messages."""
+        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
+            mock.return_value = fixture.ShipmentFailedOrdersValidationResponse
+
+            parsed = (
+                karrio.Shipment.create(self._shipment(fixture.ShipmentPayload))
+                .from_(fixture.gateway)
+                .parse()
+            )
+
+            self.assertListEqual(
+                lib.to_dict(parsed),
+                fixture.ParsedShipmentFailedOrdersValidationResponse,
+            )
+
+    def test_create_shipment_request_raw_service_code_passes_through(self):
+        """Allow raw Royal Mail service codes like CRL24 to pass straight into postageDetails.serviceCode."""
+        self.assertEqual(
+            self._serialized_request(fixture.ShipmentPayloadWithRawServiceCode),
+            fixture.ShipmentRequestWithRawServiceCode,
+        )
+
+    def test_create_shipment_request_service_option_overrides_payload_service(self):
+        """Let options.service_code override payload.service after Karrio service normalization."""
+        self.assertEqual(
+            self._serialized_request(fixture.ShipmentPayloadWithServiceOptionOverride),
+            fixture.ShipmentRequestWithServiceOptionOverride,
+        )
+
     def test_parse_shipment_response(self):
         """Parse a successful order creation response into Karrio shipment details and documents."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:

@@ -1,5 +1,6 @@
 """Royal Mail Click and Drop carrier return shipment tests."""
 
+import copy
 import unittest
 from unittest.mock import patch
 
@@ -193,6 +194,17 @@ class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
             self.assertEqual(parsed[0].tracking_number, "no code provided")
             self.assertEqual(parsed[0].shipment_identifier, "0A12345678901234")
             self.assertFalse(parsed[0].meta["tracking_number_provided"])
+
+    def test_create_return_shipment_request_omits_empty_customer_reference(self):
+        """Omit customerReference entirely when neither reference nor order fallback is supplied."""
+        payload = copy.deepcopy(fixture.ReturnShipmentPayload)
+        payload["reference"] = ""
+
+        shipment = models.ShipmentRequest(**payload)
+        request = fixture.gateway.mapper.create_return_shipment_request(shipment)
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertNotIn("customerReference", serialized["shipment"])
 
 
 if __name__ == "__main__":
