@@ -56,6 +56,37 @@ This integration therefore uses Karrio's universal rate-table mixin to support t
 - Notification target defaults to the first contact with an available email address in this order: `recipient`, `sender`, `billing`.
 - `receiveEmailNotification` now respects explicit raw option input first and otherwise falls back to whether the resolved notification target actually has an email address.
 
+## Customs and product line mapping
+
+- Royal Mail package contents are built from normalized Karrio item / commodity data.
+- The connector passes through all Royal Mail product fields when present in Karrio item data or item metadata:
+    - `SKU`
+    - `name`
+    - `quantity`
+    - `unitValue`
+    - `unitWeightInGrams`
+    - `customsDescription`
+    - `extendedCustomsDescription`
+    - `customsCode`
+    - `originCountryCode`
+    - `customsDeclarationCategory`
+    - `requiresExportLicence`
+    - `stockLocation`
+    - `useOriginPreference`
+    - `supplementaryUnits`
+    - `licenseNumber`
+    - `certificateNumber`
+- Item metadata is used for Royal Mail-specific customs/product extensions when present.
+- Shipment-level `customs.content_type` and item-level `customs_declaration_category` values are normalized into Royal Mail’s allowed category set:
+    - `none`
+    - `gift`
+    - `commercialSample`
+    - `documents`
+    - `other`
+    - `returnedGoods`
+    - `saleOfGoods`
+    - `mixedContent`
+
 ## Customs and multi-piece behavior
 
 - Single-package international shipments will fall back to `payload.customs.commodities` when parcel-level `items` are not supplied.
