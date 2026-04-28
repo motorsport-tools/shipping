@@ -1,3 +1,4 @@
+ 
 """Royal Mail Click and Drop carrier settings tests."""
 
 import copy
@@ -19,7 +20,7 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
             dict(
                 id="123456789",
                 test_mode=False,
-                carrier_id="royalmail_clickdrop",
+                carrier_id="royalmail",
                 api_key="TEST_API_KEY",
                 config=config or {},
             )

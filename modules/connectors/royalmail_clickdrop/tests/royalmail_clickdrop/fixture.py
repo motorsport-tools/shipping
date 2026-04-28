@@ -1,3 +1,4 @@
+ 
 
 """Royal Mail Click and Drop carrier tests fixtures.
 all payloads should be contained in this single file for eas of use
@@ -10,7 +11,7 @@ from unittest.mock import ANY
 import karrio.sdk as karrio
 
 
-gateway = karrio.gateway["royalmail_clickdrop"].create(
+gateway = karrio.gateway["royalmail"].create(
     {
         "id": "123456789",
         "carrier_id": "royalmail",
@@ -232,11 +233,40 @@ TrackingErrorResponseJSON = """{
 }"""
 
 
+TrackingErrorsOnlyResponseJSON = """{
+  "errors": [
+    {
+      "errorCode": "E0016",
+      "errorDescription": "Access Denied",
+      "errorCause": "No permission to retrieve details",
+      "errorResolution": "Please re-submit your API request through correct channel"
+    }
+  ]
+}"""
+
+
+ParsedTrackingErrorsOnlyResponse = [
+    [],
+    [
+        {
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
+            "code": "E0016",
+            "message": "Access Denied",
+            "details": {
+                "tracking_number": "090367574000000FE1E1B",
+                "cause": "No permission to retrieve details",
+                "resolution": "Please re-submit your API request through correct channel",
+            },
+        }
+    ],
+]
+
 ParsedTrackingResponse = [
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "tracking_number": "090367574000000FE1E1B",
             "delivered": False,
             "estimated_delivery": "2017-02-20",
@@ -260,8 +290,8 @@ ParsedTrackingResponse = [
 ParsedTrackingResponseWithoutSummary = [
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "tracking_number": "090367574000000FE1E1B",
             "delivered": False,
             "events": [
@@ -285,8 +315,8 @@ ParsedTrackingErrorResponse = [
     [],
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "400",
             "message": "Bad Request",
             "details": {
@@ -307,10 +337,11 @@ ParsedTrackingErrorResponse = [
 ParsedTrackingSummaryPartialResponse = [
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "tracking_number": "090367574000000FE1E1B",
             "delivered": False,
+            "estimated_delivery": "2017-02-20",
             "events": [
                 {
                     "code": "EVNMI",
@@ -326,8 +357,8 @@ ParsedTrackingSummaryPartialResponse = [
     ],
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "E2001",
             "message": "Tracking number not found",
             "details": {
@@ -419,8 +450,8 @@ TrackingSignatureResponseJSON = """{
 ParsedTrackingResponseWithProofOfDelivery = [
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "tracking_number": "090367574000000FE1E1B",
             "delivered": True,
             "events": [
@@ -613,17 +644,9 @@ ShipmentPayloadInvalidService["service"] = "not_a_service"
 ShipmentPayloadWithRawServiceCode = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadWithRawServiceCode["service"] = "CRL24"
 
-ShipmentRequestWithRawServiceCode = copy.deepcopy(ShipmentRequest)
-ShipmentRequestWithRawServiceCode["items"][0]["postageDetails"]["serviceCode"] = "CRL24"
-ShipmentRequestWithRawServiceCode["items"][0]["postageDetails"]["serviceRegisterCode"] = "01"
-
 ShipmentPayloadWithServiceOptionOverride = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadWithServiceOptionOverride["service"] = "tracked_24"
 ShipmentPayloadWithServiceOptionOverride["options"]["service_code"] = "CRL24"
-
-ShipmentRequestWithServiceOptionOverride = copy.deepcopy(ShipmentRequest)
-ShipmentRequestWithServiceOptionOverride["items"][0]["postageDetails"]["serviceCode"] = "CRL24"
-ShipmentRequestWithServiceOptionOverride["items"][0]["postageDetails"]["serviceRegisterCode"] = "01"
 
 ShipmentPayloadInternational = copy.deepcopy(ShipmentPayloadWithoutBilling)
 ShipmentPayloadInternational["recipient"].update(
@@ -656,6 +679,7 @@ ShipmentPayloadWithCustomsInvoiceFallback = copy.deepcopy(ShipmentPayloadInterna
 ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_number", None)
 ShipmentPayloadWithCustomsInvoiceFallback["options"].pop("commercial_invoice_date", None)
 ShipmentPayloadWithCustomsInvoiceFallback["customs"] = {
+    "commodities": [],
     "content_type": "merchandise",
     "invoice": "INV-CUSTOMS-1001",
     "invoice_date": "2024-01-03T10:00:00Z",
@@ -932,6 +956,14 @@ ShipmentRequestWithBillingAddress["items"][0]["billing"] = {
 ShipmentRequestWithOrderIdFallback = copy.deepcopy(ShipmentRequest)
 ShipmentRequestWithOrderIdFallback["items"][0]["orderReference"] = "ORDER-ID-1001"
 
+ShipmentRequestWithRawServiceCode = copy.deepcopy(ShipmentRequest)
+ShipmentRequestWithRawServiceCode["items"][0]["postageDetails"]["serviceCode"] = "CRL24"
+ShipmentRequestWithRawServiceCode["items"][0]["postageDetails"]["serviceRegisterCode"] = "01"
+
+ShipmentRequestWithServiceOptionOverride = copy.deepcopy(ShipmentRequest)
+ShipmentRequestWithServiceOptionOverride["items"][0]["postageDetails"]["serviceCode"] = "CRL24"
+ShipmentRequestWithServiceOptionOverride["items"][0]["postageDetails"]["serviceRegisterCode"] = "01"
+
 ShipmentResponseCreatedOnly = {
     "successCount": 1,
     "errorsCount": 0,
@@ -1136,8 +1168,8 @@ ShipmentFailedOrdersValidationResponse = {
 
 ParsedShipmentResponse = [
     {
-        "carrier_id": "royalmail_clickdrop",
-        "carrier_name": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
+        "carrier_name": "royalmail",
         "tracking_number": "RM123456789GB",
         "shipment_identifier": "12345678",
         "label_type": "PDF",
@@ -1164,8 +1196,8 @@ ParsedShipmentErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "BadRequest",
             "message": "The request is invalid",
             "details": {
@@ -1180,48 +1212,44 @@ ParsedShipmentFailedOrdersValidationResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "1001",
             "message": "Validation failed — check required fields: recipient.address.postcode, packages[0].weightInGrams",
             "details": {
                 "operation": "create_shipment",
                 "order_reference": "ORDER-1001",
                 "fields": [
-                    {"field": "recipient.address.postcode", "value": ""},
-                    {"field": "packages[0].weightInGrams", "value": None},
+                    {"field": "recipient.address.postcode"},
+                    {"field": "packages[0].weightInGrams"},
                 ],
             },
         },
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "1001",
             "message": "Validation failed — field 'recipient.address.postcode' is required",
             "details": {
                 "operation": "create_shipment",
                 "order_reference": "ORDER-1001",
                 "field": "recipient.address.postcode",
-                "value": "",
             },
         },
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "1001",
             "message": "Validation failed — field 'packages[0].weightInGrams' is required",
             "details": {
                 "operation": "create_shipment",
                 "order_reference": "ORDER-1001",
                 "field": "packages[0].weightInGrams",
-                "value": None,
             },
         },
     ],
 ]
 
-ShipmentPayloadWithoutTags = copy.deepcopy(ShipmentPayloadRichBase)
-ShipmentPayloadWithoutTags["options"].pop("tags", None)
 # ---------------------------------------------------------------------------
 # Cancel shipment
 # ---------------------------------------------------------------------------
@@ -1270,8 +1298,8 @@ ShipmentCancelMultiErrorResponse = [
 
 ParsedShipmentCancelResponse = [
     {
-        "carrier_id": "royalmail_clickdrop",
-        "carrier_name": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
+        "carrier_name": "royalmail",
         "operation": "Cancel Shipment",
         "success": True,
     },
@@ -1282,8 +1310,8 @@ ParsedShipmentCancelErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "NotFound",
             "message": "Order not found",
             "details": {
@@ -1339,8 +1367,8 @@ ManifestNestedErrorResponse = {
 
 ParsedManifestResponse = [
     {
-        "carrier_id": "royalmail_clickdrop",
-        "carrier_name": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
+        "carrier_name": "royalmail",
         "doc": ANY,
         "meta": {
             "manifest_number": 1001,
@@ -1355,8 +1383,8 @@ ParsedManifestErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "Forbidden",
             "message": "Feature not available",
             "details": {"operation": "manifest"},
@@ -1380,8 +1408,8 @@ GetManifestErrorResponse = {
 
 ParsedGetManifestResponse = [
     {
-        "carrier_id": "royalmail_clickdrop",
-        "carrier_name": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
+        "carrier_name": "royalmail",
         "doc": ANY,
         "meta": {
             "manifest_number": 1001,
@@ -1396,8 +1424,8 @@ ParsedGetManifestErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "Forbidden",
             "message": "Manifest not found",
             "details": {"operation": "manifest"},
@@ -1417,8 +1445,8 @@ RetryManifestErrorResponse = {
 
 ParsedRetryManifestResponse = [
     {
-        "carrier_id": "royalmail_clickdrop",
-        "carrier_name": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
+        "carrier_name": "royalmail",
         "meta": {
             "manifest_number": 1002,
             "status": "in_progress",
@@ -1432,8 +1460,8 @@ ParsedRetryManifestErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "BadRequest",
             "message": "Manifest cannot be retried",
             "details": {"operation": "manifest"},
@@ -1507,8 +1535,8 @@ ParsedLabelErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "NotFound",
             "message": "Order not found",
             "details": {
@@ -1584,8 +1612,8 @@ OrderStatusErrorResponse = [
 
 ParsedOrderStatusResponse = [
     {
-        "carrier_id": "royalmail_clickdrop",
-        "carrier_name": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
+        "carrier_name": "royalmail",
         "operation": "Update Order Status",
         "success": True,
     },
@@ -1596,8 +1624,8 @@ ParsedOrderStatusErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "BadRequest",
             "message": "Invalid status update request",
             "details": {
@@ -1617,8 +1645,8 @@ ParsedReturnShipmentWithoutShipmentResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "return_shipment_error",
             "message": "Unable to parse return shipment response",
             "details": {"operation": "create_return_shipment"},
@@ -1700,8 +1728,6 @@ ReturnShipmentPayloadWithServiceOptionOverride = copy.deepcopy(ReturnShipmentPay
 ReturnShipmentPayloadWithServiceOptionOverride["service"] = "tracked_24"
 ReturnShipmentPayloadWithServiceOptionOverride["options"] = {"service_code": "TSS"}
 
-ReturnShipmentRequestWithServiceOptionOverride = copy.deepcopy(ReturnShipmentRequest)
-
 ReturnShipmentRequest = {
     "service": {"serviceCode": "TSS"},
     "shipment": {
@@ -1728,6 +1754,8 @@ ReturnShipmentRequest = {
         },
     },
 }
+
+ReturnShipmentRequestWithServiceOptionOverride = copy.deepcopy(ReturnShipmentRequest)
 
 ReturnShipmentResponse = {
     "shipment": {
@@ -1776,8 +1804,8 @@ ReturnShipmentArrayErrorResponse = [
 
 ParsedReturnShipmentResponse = [
     {
-        "carrier_id": "royalmail_clickdrop",
-        "carrier_name": "royalmail_clickdrop",
+        "carrier_id": "royalmail",
+        "carrier_name": "royalmail",
         "tracking_number": "RM123456789GB",
         "shipment_identifier": "0A12345678901234",
         "label_type": "PDF",
@@ -1799,8 +1827,8 @@ ParsedReturnShipmentErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "BadRequest",
             "message": "Invalid return request",
             "details": {
@@ -1932,8 +1960,8 @@ ParsedGetOrderDetailsErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "NotFound",
             "message": "Order details not found",
             "details": {
@@ -1993,8 +2021,8 @@ ParsedGetOrderErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "NotFound",
             "message": "Order not found",
             "details": {
@@ -2044,8 +2072,8 @@ RatePayload = {
 RateResponse = {
     "rates": [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "service": "TPN24",
             "currency": "GBP",
             "total_charge": 8.5,
@@ -2068,8 +2096,8 @@ RateErrorResponse = {
 ParsedRateResponse = [
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "service": "TPN24",
             "currency": "GBP",
             "total_charge": 8.5,
@@ -2148,8 +2176,8 @@ ParsedListOrdersErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "BadRequest",
             "message": "Invalid paging request",
             "details": {"operation": "list_orders"},
@@ -2236,8 +2264,8 @@ ParsedListOrderDetailsErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "BadRequest",
             "message": "Invalid order details lookup request",
             "details": {"operation": "list_order_details"},
@@ -2277,8 +2305,8 @@ ParsedVersionErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "Forbidden",
             "message": "Not authorised to view version information",
             "details": {"operation": "get_version"},
@@ -2322,8 +2350,8 @@ ParsedReturnServicesErrorResponse = [
     None,
     [
         {
-            "carrier_id": "royalmail_clickdrop",
-            "carrier_name": "royalmail_clickdrop",
+            "carrier_id": "royalmail",
+            "carrier_name": "royalmail",
             "code": "Forbidden",
             "message": "Not authorised to view return services",
             "details": {"operation": "get_return_services"},

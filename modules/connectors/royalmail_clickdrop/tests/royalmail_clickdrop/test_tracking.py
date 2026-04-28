@@ -1,3 +1,4 @@
+ 
 """Royal Mail Click and Drop carrier tracking tests."""
 
 import copy
@@ -68,9 +69,34 @@ class TestRoyalMailClickandDropTracking(unittest.TestCase):
                 "/mailpieces/v2/summary?mailPieceId=",
                 mock.call_args_list[0][1]["url"],
             )
+            self.assertIn(
+                ",".join(fixture.TrackingPayloadMulti["tracking_numbers"]),
+                mock.call_args_list[0][1]["url"],
+            )
+            self.assertNotIn(
+                "%2C",
+                mock.call_args_list[0][1]["url"],
+            )
             self.assertEqual(
                 mock.call_args_list[1][1]["url"],
                 f"{fixture.gateway.settings.tracking_server_url}/mailpieces/v2/{fixture.TrackingRequestJSON[0]}/events",
+            )
+
+    def test_parse_tracking_errors_only_response(self):
+        """Normalize Royal Mail Tracking API errors-only responses into Karrio messages."""
+        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
+            mock.return_value = fixture.TrackingErrorsOnlyResponseJSON
+
+            parsed_response = (
+                karrio.Tracking.fetch(
+                    self._tracking(fixture.TrackingPayload)
+                ).from_(fixture.gateway).parse()
+            )
+
+            self.assertEqual(mock.call_count, 1)
+            self.assertListEqual(
+                lib.to_dict(parsed_response),
+                fixture.ParsedTrackingErrorsOnlyResponse,
             )
 
     def test_parse_tracking_response(self):

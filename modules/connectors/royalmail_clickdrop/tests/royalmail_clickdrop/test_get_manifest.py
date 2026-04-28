@@ -1,5 +1,6 @@
  
  
+ 
 """Royal Mail Click and Drop carrier get manifest helper tests."""
 
 import unittest

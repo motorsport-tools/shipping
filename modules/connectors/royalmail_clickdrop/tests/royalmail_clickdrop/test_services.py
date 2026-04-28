@@ -1,3 +1,4 @@
+ 
 """Royal Mail Click and Drop carrier services tests."""
 
 import copy
@@ -41,12 +42,42 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         metadata = plugin.METADATA
         service_levels = metadata.service_levels or []
 
-        self.assertEqual(metadata.id, "royalmail_clickdrop")
+        self.assertEqual(metadata.id, "royalmail")
         self.assertGreater(len(service_levels), 0)
 
         codes = [service.service_code for service in service_levels]
         for code in fixture.ExpectedCoreServices:
             self.assertIn(code, codes)
+
+    def test_service_weight_limits_are_normalized(self):
+        """Keep Royal Mail service metadata in grams exactly as declared in services.csv."""
+        services = {
+            service.service_code: service
+            for service in provider_units.DEFAULT_SERVICES or []
+        }
+
+        self.assertEqual(services["TPN24"].weight_unit, "G")
+        self.assertEqual(services["TPN24"].max_weight, 2000.0)
+
+        self.assertEqual(services["FE0"].weight_unit, "G")
+        self.assertEqual(services["FE0"].max_weight, 30000.0)
+
+    def test_service_features_are_loaded(self):
+        """Expose services.csv feature tokens as Karrio ServiceLevelFeatures."""
+        services = {
+            service.service_code: service
+            for service in provider_units.DEFAULT_SERVICES or []
+        }
+
+        tracked_24 = services["TPN24"]
+        self.assertTrue(tracked_24.features.tracked)
+        self.assertTrue(tracked_24.features.b2c)
+        self.assertTrue(tracked_24.features.b2b)
+        self.assertEqual(tracked_24.features.shipment_type, "outbound")
+
+        tracked_returns = services["TSS"]
+        self.assertTrue(tracked_returns.features.tracked)
+        self.assertEqual(tracked_returns.features.shipment_type, "returns")
 
     def test_resolve_carrier_service(self):
         """Resolve service aliases and direct service codes, but not raw register codes."""

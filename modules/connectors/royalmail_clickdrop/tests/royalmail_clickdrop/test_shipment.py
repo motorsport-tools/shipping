@@ -1,3 +1,4 @@
+ 
 """Royal Mail Click and Drop carrier shipment tests."""
 
 import copy
@@ -59,17 +60,19 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
 
     def test_create_shipment_request_raw_service_code_passes_through(self):
         """Allow raw Royal Mail service codes like CRL24 to pass straight into postageDetails.serviceCode."""
-        self.assertEqual(
-            self._serialized_request(fixture.ShipmentPayloadWithRawServiceCode),
-            fixture.ShipmentRequestWithRawServiceCode,
-        )
+        serialized = self._serialized_request(fixture.ShipmentPayloadWithRawServiceCode)
+        postage = serialized["items"][0]["postageDetails"]
+
+        self.assertEqual(postage["serviceCode"], "CRL24")
+        self.assertEqual(postage["serviceRegisterCode"], "01")
 
     def test_create_shipment_request_service_option_overrides_payload_service(self):
         """Let options.service_code override payload.service after Karrio service normalization."""
-        self.assertEqual(
-            self._serialized_request(fixture.ShipmentPayloadWithServiceOptionOverride),
-            fixture.ShipmentRequestWithServiceOptionOverride,
-        )
+        serialized = self._serialized_request(fixture.ShipmentPayloadWithServiceOptionOverride)
+        postage = serialized["items"][0]["postageDetails"]
+
+        self.assertEqual(postage["serviceCode"], "CRL24")
+        self.assertEqual(postage["serviceRegisterCode"], "01")
 
     def test_parse_shipment_response(self):
         """Parse a successful order creation response into Karrio shipment details and documents."""
@@ -399,8 +402,6 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
     def test_create_shipment_request_supports_spec_valid_sku_plus_quantity_items(self):
         """Keep SKU lookup items to Royal Mail's SKU + quantity mode without auto-filled descriptive fields."""
         payload = copy.deepcopy(fixture.ShipmentPayloadWithoutItemValueWeight)
-        payload["options"].pop("subtotal", None)
-        payload["options"].pop("total", None)
 
         serialized = self._serialized_request(payload)
         item = serialized["items"][0]
@@ -413,8 +414,8 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
         self.assertNotIn("extendedCustomsDescription", content)
         self.assertNotIn("unitValue", content)
         self.assertNotIn("unitWeightInGrams", content)
-        self.assertNotIn("subtotal", item)
-        self.assertNotIn("total", item)
+        self.assertEqual(item["subtotal"], 25.0)
+        self.assertEqual(item["total"], 28.5)
 
     def test_create_shipment_request_quantizes_monetary_fields_to_two_decimals(self):
         """Quantize Royal Mail monetary fields to 2 decimal places using half-up rounding."""
@@ -446,6 +447,7 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
         payload["customs"] = {
             "content_type": "merchandise",
             "incoterm": "DAP",
+            "commodities": [],
         }
 
         serialized = self._serialized_request(payload)
@@ -465,6 +467,7 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
         payload["customs"] = {
             "content_type": "merchandise",
             "incoterm": "DDP",
+            "commodities": [],
         }
 
         serialized = self._serialized_request(payload)
@@ -528,7 +531,7 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
         self.assertNotIn("originCountryCode", content)
 
     def test_parse_shipment_response_empty_created_orders(self):
-        """Return no shipment and no messages when Royal Mail reports no created orders and no errors."""
+        """Return a parser error when Royal Mail reports no created orders and no carrier errors."""
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
             mock.return_value = fixture.ShipmentResponseEmptyCreatedOrders
 
@@ -538,7 +541,9 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
                 .parse()
             )
 
-            self.assertListEqual(lib.to_dict(parsed), [None, []])
+            self.assertIsNone(parsed[0])
+            self.assertEqual(len(parsed[1]), 1)
+            self.assertEqual(parsed[1][0].code, "shipment_parse_error")
 
     def test_parse_shipment_array_error_response(self):
         """Flatten array-based shipment errors into Karrio message objects."""
