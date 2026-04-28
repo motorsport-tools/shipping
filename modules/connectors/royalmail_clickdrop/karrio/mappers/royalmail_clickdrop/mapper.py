@@ -10,14 +10,28 @@ import karrio.providers.royalmail_clickdrop as provider
 import karrio.providers.royalmail_clickdrop.manifest as manifest_provider
 import karrio.providers.royalmail_clickdrop.orders.query as order_query
 import karrio.universal.providers.rating as universal_provider
+import karrio.providers.royalmail_clickdrop.units as provider_units
 
 
 class Mapper(mapper.Mapper):
     settings: provider_settings.Settings
 
     def create_rate_request(self, payload: models.RateRequest) -> lib.Serializable:
-        return universal_provider.rate_request(payload, self.settings)
+        request_data = lib.to_dict(payload)
+        requested_services = request_data.get("services") or []
 
+        request_data["services"] = list(
+            dict.fromkeys(
+                provider_units.resolve_service_code(service) or str(service).strip()
+                for service in requested_services
+                if service not in [None, ""]
+            )
+        )
+
+        return universal_provider.rate_request(
+            models.RateRequest(**request_data),
+            self.settings,
+        )
     def create_shipment_request(
         self, payload: models.ShipmentRequest
     ) -> lib.Serializable:

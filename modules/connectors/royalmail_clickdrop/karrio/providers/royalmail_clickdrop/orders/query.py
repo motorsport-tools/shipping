@@ -5,6 +5,7 @@ import typing
 import karrio.core.models as models
 import karrio.lib as lib
 import karrio.providers.royalmail_clickdrop.error as error
+import karrio.providers.royalmail_clickdrop.units as provider_units
 import karrio.providers.royalmail_clickdrop.utils as provider_utils
 import karrio.schemas.royalmail_clickdrop.order_details_response as order_details_res
 import karrio.schemas.royalmail_clickdrop.order_info_response as order_info_res
@@ -321,7 +322,32 @@ def parse_get_return_services_response(
             )
         ]
 
-    data = lib.to_object(return_services_res.ReturnServicesResponseType, response)
+    services = []
+    for service in response.get("services") or []:
+        if not isinstance(service, dict):
+            continue
+
+        raw_service_code = provider_utils.get_value(service, "serviceCode")
+        service_name = provider_utils.get_value(service, "serviceName")
+
+        services.append(
+            {
+                **service,
+                "serviceCode": (
+                    provider_units.resolve_service_code(raw_service_code)
+                    or provider_units.resolve_service_code(service_name)
+                    or raw_service_code
+                ),
+            }
+        )
+
+    data = lib.to_object(
+        return_services_res.ReturnServicesResponseType,
+        {
+            **response,
+            "services": services,
+        },
+    )
 
     return data, []
 

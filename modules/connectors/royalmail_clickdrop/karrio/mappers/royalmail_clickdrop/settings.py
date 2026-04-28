@@ -13,25 +13,28 @@ import karrio.universal.mappers.rating_proxy as rating_proxy
 class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
     """Royal Mail Click and Drop connection settings."""
 
-    api_key: str
-    
-    """Royal Mail Tracking connection settings."""
+    click_and_drop_api_key: str = attr.ib(metadata={"sensitive": True})
+
+    # Important: use plain `str = None` here, not `typing.Optional[str]`,
+    # because Karrio's connection_fields introspection does not currently
+    # normalize Optional[...] into "string" for the config UI.
     tracking_client_id: str = None
-    tracking_client_secret: str = None
+    tracking_client_secret: str = attr.ib(
+        default=None,
+        metadata={"sensitive": True},
+    )
 
     id: str = None
     test_mode: bool = False
     carrier_id: str = "royalmail"
     account_country_code: str = None
-    services: typing.List[models.ServiceLevel] = jstruct.JList[models.ServiceLevel, False, dict(default=provider_units.DEFAULT_SERVICES)]  # type: ignore
-    
-    #With `attr.s(auto_attribs=True)`, the current code creates shared mutable defaults. but using the correct commented syntax causes an issue in karrio of a circular reference
-    #correct syntax
-    #metadata: dict = attr.ib(factory=dict)
-    #config: dict = attr.ib(factory=dict)
+    services: typing.List[models.ServiceLevel] = jstruct.JList[
+        models.ServiceLevel,
+        False,
+        dict(default=provider_units.DEFAULT_SERVICES),
+    ]  # type: ignore
 
-    # working syntax
-
+    # Keeping the existing pattern used across connectors for now.
     metadata: dict = {}
     config: dict = {}
 
@@ -41,6 +44,3 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
             return self.services
 
         return provider_units.DEFAULT_SERVICES
- 
-
- 

@@ -11,7 +11,7 @@ import karrio.core as core
 class Settings(core.Settings):
     """Royal Mail Click and Drop connection settings."""
 
-    api_key: str
+    click_and_drop_api_key: str
 
     tracking_client_id: str = None
     tracking_client_secret: str = None
@@ -21,20 +21,37 @@ class Settings(core.Settings):
         return "royalmail"
 
     @property
+    def api_key(self) -> str:
+        """Backward-compatible alias used by existing proxy code."""
+        return self.click_and_drop_api_key
+
+    @property
     def connection_config(self) -> lib.units.Options:
         from karrio.providers.royalmail_clickdrop.units import ConnectionConfig
 
+        raw_config = dict(self.config or {})
+
+        # Backward compatibility for older saved config payloads
+        if (
+            raw_config.get("base_url")
+            and not raw_config.get("click_and_drop_api_base_url")
+        ):
+            raw_config["click_and_drop_api_base_url"] = raw_config.pop("base_url")
+
+        if (
+            raw_config.get("tracking_base_url")
+            and not raw_config.get("tracking_api_base_url")
+        ):
+            raw_config["tracking_api_base_url"] = raw_config.pop("tracking_base_url")
+
         return lib.to_connection_config(
-            self.config or {},
+            raw_config,
             option_type=ConnectionConfig,
         )
 
     @property
     def server_url(self):
-        return (
-            self.connection_config.base_url.state
-            or "https://api.parcel.royalmail.com/api/v1"
-        ).rstrip("/")
+        return self.connection_config.click_and_drop_api_base_url.state.rstrip("/")
 
     @property
     def shipping_carrier_name(self) -> typing.Optional[str]:
@@ -42,7 +59,7 @@ class Settings(core.Settings):
 
     @property
     def authorization(self) -> str:
-        return f"Bearer {self.api_key}"
+        return f"Bearer {self.click_and_drop_api_key}"
 
     @property
     def headers(self) -> dict:
@@ -72,16 +89,13 @@ class Settings(core.Settings):
 
     @property
     def tracking_server_url(self):
-        return (
-            self.connection_config.tracking_base_url.state
-            or "https://api.royalmail.net"
-        ).rstrip("/")
+        return self.connection_config.tracking_api_base_url.state.rstrip("/")
 
     @property
     def tracking_headers(self) -> dict:
         if not all([self.tracking_client_id, self.tracking_client_secret]):
             raise ValueError(
-                "Royal Mail tracking requires `tracking_client_id` and `tracking_client_secret`."
+                "Royal Mail Tracking API requires `tracking_client_id` and `tracking_client_secret`."
             )
 
         return {
@@ -90,7 +104,6 @@ class Settings(core.Settings):
             "X-IBM-Client-Secret": self.tracking_client_secret,
             "X-Accept-RMG-Terms": "yes",
         }
-
 
 def clean_payload(value):
     """

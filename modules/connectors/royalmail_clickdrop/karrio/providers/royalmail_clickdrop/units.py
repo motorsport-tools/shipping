@@ -1,6 +1,7 @@
 import csv
 import pathlib
 import typing
+import re
 from decimal import Decimal, ROUND_HALF_UP
 
 import karrio.lib as lib
@@ -13,23 +14,32 @@ class LabelType(lib.Enum):
 
 
 class ConnectionConfig(lib.Enum):
-    """Carrier connection configuration options."""
-
     include_label_in_response = lib.OptionEnum(
-        "include_label_in_response", bool, True, True
+        "include_label_in_response",
+        bool,
+        default=True,
     )
     include_return_label_in_response = lib.OptionEnum(
-        "include_return_label_in_response", bool, False, False
+        "include_return_label_in_response",
+        bool,
+        default=False,
     )
 
-    base_url = lib.OptionEnum("base_url", str)
-    tracking_base_url = lib.OptionEnum("tracking_base_url", str)
+    click_and_drop_api_base_url = lib.OptionEnum(
+        "click_and_drop_api_base_url",
+        str,
+        default="https://api.parcel.royalmail.com/api/v1",
+    )
+    tracking_api_base_url = lib.OptionEnum(
+        "tracking_api_base_url",
+        str,
+        default="https://api.royalmail.net",
+    )
+
     carrier_name = lib.OptionEnum("carrier_name", str)
     label_type = lib.OptionEnum("label_type", LabelType)
-
     shipping_options = lib.OptionEnum("shipping_options", list)
     shipping_services = lib.OptionEnum("shipping_services", list)
-
 
 class TrackingIncidentReason(lib.Enum):
     carrier_damaged_parcel = ["DAMAGED"]
@@ -185,6 +195,38 @@ def dimension_in_mms(measurement, default=None) -> typing.Optional[int]:
     raw = _decimal(measurement)
     return _round_decimal(raw) if raw is not None else default
 
+def _friendly_service_name(value: typing.Optional[str]) -> typing.Optional[str]:
+    text = str(value or "").strip()
+    if text == "":
+        return None
+
+    return re.sub(r"\s*\([^)]*\)\s*$", "", text).strip() or text
+
+
+def _slugify_service_code(value: typing.Optional[str]) -> typing.Optional[str]:
+    text = str(value or "").strip().lower()
+    if text == "":
+        return None
+
+    slug = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+    return slug or None
+
+
+def _canonical_service_code(
+    raw_service_code: typing.Optional[str],
+    service_name: typing.Optional[str] = None,
+) -> typing.Optional[str]:
+    raw = str(raw_service_code or "").strip().upper()
+    if raw == "":
+        return None
+
+    mapped = ShippingService.map(raw)
+    if getattr(mapped, "enum", None) is not None:
+        return mapped.name_or_key
+
+    # Keep a stable DB-safe unique fallback for services that do not yet have
+    # a dedicated ShippingService alias.
+    return raw.lower()
 
 class PackagingType(lib.StrEnum):
     """
@@ -576,8 +618,14 @@ def load_services_from_csv() -> list:
         reader = csv.DictReader((row for row in csvfile if row.strip()))
 
         for row in reader:
-            service_code = (row.get("service_code") or "").strip().upper()
-            if not service_code:
+            service_code = _slugify_service_code(row.get("service_code"))
+            raw_service_code = (row.get("carrier_service_code") or "").strip().upper()
+            service_name = (row.get("service_name") or "").strip()
+            service_register_code = (
+                (row.get("service_register_code") or "").strip() or None
+            )
+
+            if not service_code or not raw_service_code:
                 continue
 
             zone_label = (row.get("zone_label") or "").strip()
@@ -589,7 +637,6 @@ def load_services_from_csv() -> list:
             )
 
             weight_unit = (row.get("weight_unit") or "G").strip()
-
             dimension_unit = (row.get("dimension_unit") or "CM").strip()
 
             zone = models.ServiceZone(
@@ -601,11 +648,9 @@ def load_services_from_csv() -> list:
 
             if service_code not in services_dict:
                 services_dict[service_code] = {
-                    "service_name": (row.get("service_name") or "").strip(),
+                    "service_name": service_name or raw_service_code,
                     "service_code": service_code,
-                    "carrier_service_code": (
-                        (row.get("carrier_service_code") or "").strip() or None
-                    ),
+                    "carrier_service_code": raw_service_code,
                     "currency": (row.get("currency") or "GBP").strip(),
                     "weight_unit": weight_unit,
                     "dimension_unit": dimension_unit,
@@ -623,23 +668,112 @@ def load_services_from_csv() -> list:
                     "domicile": str(row.get("domicile", "")).lower() == "true",
                     "international": str(row.get("international", "")).lower() == "true",
                     "features": _parse_service_features(row.get("features")),
+                    "metadata": {
+                        "service_register_code": service_register_code,
+                    },
                     "zones": [zone],
                 }
             else:
                 services_dict[service_code]["zones"].append(zone)
 
     return [models.ServiceLevel(**service_data) for service_data in services_dict.values()]
-
-
 DEFAULT_SERVICES = load_services_from_csv()
 
-REFERENCE_SERVICE_LEVELS = lib.to_dict(DEFAULT_SERVICES, clear_empty=False)
+
+class ReferenceRecord(dict):
+    """
+    Dict-like wrapper used for plugin metadata service_levels.
+
+    Why this exists:
+    - `/v1/references` needs JSON-serializable service metadata
+    - tests and metadata consumers still expect attribute access like
+      `service.service_code` and `service.features.tracked`
+
+    This wrapper preserves both behaviors by:
+    - remaining a dict for JSON encoding
+    - exposing keys via attribute access
+    - recursively wrapping nested dict/list structures
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as e:
+            raise AttributeError(name) from e
+
+    @classmethod
+    def wrap(cls, value):
+        if isinstance(value, dict):
+            return cls({key: cls.wrap(item) for key, item in value.items()})
+
+        if isinstance(value, list):
+            return [cls.wrap(item) for item in value]
+
+        return value
+
+
+REFERENCE_SERVICE_LEVELS = ReferenceRecord.wrap(
+    lib.to_dict(DEFAULT_SERVICES, clear_empty=False)
+)
+
+def _service_selector_key(value: typing.Any) -> typing.Optional[str]:
+    text = str(value or "").strip().lower()
+    if text == "":
+        return None
+
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def _service_selector_values(service: models.ServiceLevel) -> typing.List[str]:
+    values = [
+        service.service_code,
+        service.carrier_service_code,
+        service.service_name,
+        _friendly_service_name(service.service_name),
+    ]
+
+    return [str(value).strip() for value in values if value not in [None, ""]]
+
 
 def _services_index() -> dict[str, models.ServiceLevel]:
-    return {str(svc.service_code).lower(): svc for svc in DEFAULT_SERVICES if svc.service_code}
+    return {
+        str(service.service_code).lower(): service
+        for service in DEFAULT_SERVICES
+        if service.service_code
+    }
+
+
+def _carrier_services_index() -> dict[str, models.ServiceLevel]:
+    return {
+        str(service.carrier_service_code).upper(): service
+        for service in DEFAULT_SERVICES
+        if service.carrier_service_code
+    }
+
+
+def _service_selector_index() -> dict[str, str]:
+    index: dict[str, str] = {}
+
+    for service in DEFAULT_SERVICES:
+        for selector in _service_selector_values(service):
+            key = _service_selector_key(selector)
+            if key is not None:
+                index[key] = service.service_code
+
+    for name, member in ShippingService.__members__.items():
+        for selector in [name, name.replace("_", " "), member.value]:
+            key = _service_selector_key(selector)
+            if key is not None:
+                index[key] = name
+
+    return index
 
 
 SERVICES_INDEX = _services_index()
+CARRIER_SERVICES_INDEX = _carrier_services_index()
+SERVICE_SELECTOR_INDEX = _service_selector_index()
 
 RETURN_SERVICE_CODES = {
     "RT0",
@@ -654,63 +788,66 @@ RETURN_SERVICE_CODES = {
 }
 
 
-def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[str]:
+def resolve_service_code(service: typing.Optional[str]) -> typing.Optional[str]:
     """
-    Resolve a Karrio-facing service selector to a Royal Mail API serviceCode.
-
-    Supported inputs:
-    - exact CSV service codes, e.g. 'TPN24'
-    - exact enum aliases, e.g. 'tracked_24'
-
-    Returns:
-    - Royal Mail serviceCode string
-    - None for empty or unknown input
+    Resolve any supported selector to the canonical Karrio service_code.
     """
-    if service is None:
+    key = _service_selector_key(service)
+    if key is None:
         return None
 
-    value = str(service).strip()
-    if value == "":
-        return None
-
-    key = value.lower()
-
-    # 1. exact CSV service code
-    if key in SERVICES_INDEX:
-        return SERVICES_INDEX[key].service_code
-
-    # 2. exact enum alias
-    alias_map = {
-        name.lower(): member.value
-        for name, member in ShippingService.__members__.items()
-    }
-    if key in alias_map:
-        return alias_map[key]
-
-    return None
+    return SERVICE_SELECTOR_INDEX.get(key)
 
 
-def resolve_service_register_code(service: typing.Optional[str]) -> typing.Optional[str]:
-    """
-    Resolve a Karrio-facing service selector to the Royal Mail API
-    serviceRegisterCode defined in services.csv.
-    """
-    resolved_service_code = resolve_carrier_service(service)
-
+def resolve_service_level(
+    service: typing.Optional[str],
+) -> typing.Optional[models.ServiceLevel]:
+    resolved_service_code = resolve_service_code(service)
     if resolved_service_code is None:
         return None
 
-    service_level = SERVICES_INDEX.get(str(resolved_service_code).lower())
+    return SERVICES_INDEX.get(str(resolved_service_code).lower())
+
+
+def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[str]:
+    """
+    Resolve any supported selector to the Royal Mail API serviceCode.
+    """
+    service_level = resolve_service_level(service)
     if service_level is None:
         return None
 
     return service_level.carrier_service_code
 
 
+def resolve_service_name(
+    service: typing.Optional[str],
+    friendly: bool = True,
+) -> typing.Optional[str]:
+    service_level = resolve_service_level(service)
+    if service_level is None:
+        return None
+
+    if friendly:
+        return _friendly_service_name(service_level.service_name) or service_level.service_name
+
+    return service_level.service_name
+
+
+def resolve_service_register_code(service: typing.Optional[str]) -> typing.Optional[str]:
+    """
+    Resolve any supported selector to the Royal Mail API serviceRegisterCode.
+    """
+    service_level = resolve_service_level(service)
+    if service_level is None:
+        return None
+
+    return (service_level.metadata or {}).get("service_register_code")
+
+
 def is_return_service(service: typing.Optional[str]) -> bool:
     resolved = resolve_carrier_service(service)
     return resolved in RETURN_SERVICE_CODES if resolved else False
-
 
 def build_dimensions(package, dimension_type, raw_package=None):
     raw_dimension_unit = _source_value(raw_package, "dimension_unit", "dimensionUnit")

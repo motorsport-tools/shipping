@@ -40,18 +40,39 @@ def _resolve_country_name(address) -> str:
     return ""
 
 
+ISO3_FALLBACKS = {
+    "GB": "GBR",
+    "US": "USA",
+    "ES": "ESP",
+    "FR": "FRA",
+    "DE": "DEU",
+    "IE": "IRL",
+    "IT": "ITA",
+    "NL": "NLD",
+    "BE": "BEL",
+    "CH": "CHE",
+    "AT": "AUT",
+    "AU": "AUS",
+    "CA": "CAN",
+    "NZ": "NZL",
+}
+
+
 def _resolve_country_iso3(country_code: str) -> str:
     if not country_code:
         return ""
 
-    code = str(country_code).upper()
+    code = str(country_code).strip().upper()
+
+    if len(code) == 3 and code.isalpha():
+        return code
 
     if pycountry is not None:
-        country = pycountry.countries.get(alpha_2=code)
+        country = pycountry.countries.get(alpha_2=code) or pycountry.countries.get(alpha_3=code)
         if country is not None:
             return country.alpha_3
 
-    return code
+    return ISO3_FALLBACKS.get(code, code)
 
 
 def _first_present(*values):
