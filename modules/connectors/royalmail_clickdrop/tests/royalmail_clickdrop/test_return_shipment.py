@@ -210,3 +210,12 @@ class TestRoyalMailClickandDropReturnShipment(unittest.TestCase):
 
         self.assertNotIn("customerReference", serialized["shipment"])
 
+    @patch("karrio.providers.royalmail_clickdrop.shipment.return_shipment.pycountry", None)
+    def test_create_return_shipment_request_us_country_mapping_without_pycountry(self):
+        """Keep ISO3 country mapping stable even if pycountry is unavailable."""
+        shipment = models.ShipmentRequest(**fixture.ReturnShipmentPayloadUSCountry)
+        request = fixture.gateway.mapper.create_return_shipment_request(shipment)
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertEqual(serialized["shipment"]["shippingAddress"]["country"], "United States")
+        self.assertEqual(serialized["shipment"]["shippingAddress"]["countryIsoCode"], "USA")

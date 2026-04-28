@@ -15,7 +15,7 @@ class TestRoyalMailClickandDropTrackingConfig(unittest.TestCase):
         payload = {
             "id": "123456789",
             "carrier_id": "royalmail",
-            "api_key": "CLICKDROP_API_KEY",
+            "click_and_drop_api_key": "CLICKDROP_API_KEY",
             "tracking_client_id": kwargs.get("tracking_client_id"),
             "tracking_client_secret": kwargs.get("tracking_client_secret"),
             "config": kwargs.get("config", {}),
@@ -57,12 +57,25 @@ class TestRoyalMailClickandDropTrackingConfig(unittest.TestCase):
         gateway = self._gateway(
             tracking_client_id="CLIENT_ID",
             tracking_client_secret="CLIENT_SECRET",
-            config={"tracking_base_url": "https://tracking.example.test/v2/"},
+            config={"tracking_api_base_url": "https://tracking.example.test/v2/"},
         )
 
         self.assertEqual(
             gateway.settings.tracking_server_url,
             "https://tracking.example.test/v2",
+        )
+
+    def test_tracking_server_url_accepts_legacy_config_key(self):
+        """Remain backward compatible with older `tracking_base_url` config payloads."""
+        gateway = self._gateway(
+            tracking_client_id="CLIENT_ID",
+            tracking_client_secret="CLIENT_SECRET",
+            config={"tracking_base_url": "https://tracking-legacy.example.test/v2/"},
+        )
+
+        self.assertEqual(
+            gateway.settings.tracking_server_url,
+            "https://tracking-legacy.example.test/v2",
         )
 
     def test_get_tracking_sends_tracking_headers_on_summary_and_events_requests(self):
@@ -106,8 +119,8 @@ class TestRoyalMailClickandDropTrackingConfig(unittest.TestCase):
             "httpMessage": "Not Found",
             "errors": [
                 {
-                    "errorCode": "E2002",
-                    "errorDescription": "No signature available",
+                    "errorCode": "NOT_FOUND",
+                    "errorDescription": "Proof of delivery not available",
                 }
             ],
         }
@@ -115,7 +128,7 @@ class TestRoyalMailClickandDropTrackingConfig(unittest.TestCase):
         with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
             mock.side_effect = [
                 fixture.TrackingSummaryResponseWithProofOfDeliveryJSON,
-                fixture.TrackingResponseWithProofOfDeliveryJSON,
+                fixture.TrackingResponseJSON,
                 signature_error_response,
             ]
 
@@ -125,6 +138,7 @@ class TestRoyalMailClickandDropTrackingConfig(unittest.TestCase):
                 ).from_(fixture.gateway).parse()
             )
 
-            details = parsed[0][0]
-            self.assertEqual(details.tracking_number, fixture.TrackingPayload["tracking_numbers"][0])
-            self.assertIsNone(details.images)
+            details, messages = parsed
+            self.assertEqual(len(messages), 0)
+            self.assertEqual(len(details), 1)
+            self.assertEqual(details[0].tracking_number, "090367574000000FE1E1B")

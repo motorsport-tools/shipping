@@ -1,20 +1,18 @@
- 
 """Royal Mail Click and Drop carrier services tests."""
 
 import copy
+import json
 import unittest
 
 import karrio.core.models as models
 import karrio.lib as lib
 import karrio.plugins.royalmail_clickdrop as plugin
 import karrio.providers.royalmail_clickdrop.units as provider_units
+import karrio.references as references
+
 
 from . import fixture
 
-import logging
-import karrio.sdk as karrio
-
-logger = logging.getLogger(__name__)
 
 class TestRoyalMailClickandDropServices(unittest.TestCase):
     def setUp(self):
@@ -28,8 +26,11 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         serialized = lib.to_dict(request.serialize())
         return serialized["items"][0]["packages"][0]["packageFormatIdentifier"]
 
+    def _service_code(self, service):
+        return getattr(service, "service_code", None) or service.get("service_code")
+
     def test_services_catalog_loads(self):
-        """Load services from CSV and expose expected core Royal Mail service codes."""
+        """Load services from CSV and expose expected canonical Royal Mail service codes."""
         services = provider_units.DEFAULT_SERVICES or []
         self.assertGreater(len(services), 0)
 
@@ -45,9 +46,26 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertEqual(metadata.id, "royalmail")
         self.assertGreater(len(service_levels), 0)
 
-        codes = [service.service_code for service in service_levels]
+        codes = [self._service_code(service) for service in service_levels]
         for code in fixture.ExpectedCoreServices:
             self.assertIn(code, codes)
+
+    def test_plugin_metadata_service_levels_are_json_serializable(self):
+        """Keep plugin metadata service levels JSON-safe for /v1/references."""
+        metadata = plugin.METADATA
+        service_levels = metadata.service_levels or []
+
+        json.dumps(service_levels)
+
+        tracked_24 = next(
+            service
+            for service in service_levels
+            if self._service_code(service) == "tracked_24"
+        )
+
+        self.assertTrue(tracked_24.features.tracked)
+        self.assertTrue(tracked_24.features.b2c)
+        self.assertEqual(tracked_24.features.shipment_type, "outbound")
 
     def test_service_weight_limits_are_normalized(self):
         """Keep Royal Mail service metadata in grams exactly as declared in services.csv."""
@@ -56,11 +74,11 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             for service in provider_units.DEFAULT_SERVICES or []
         }
 
-        self.assertEqual(services["TPN24"].weight_unit, "G")
-        self.assertEqual(services["TPN24"].max_weight, 2000.0)
+        self.assertEqual(services["tracked_24"].weight_unit, "G")
+        self.assertEqual(services["tracked_24"].max_weight, 2000.0)
 
-        self.assertEqual(services["FE0"].weight_unit, "G")
-        self.assertEqual(services["FE0"].max_weight, 30000.0)
+        self.assertEqual(services["express_48"].weight_unit, "G")
+        self.assertEqual(services["express_48"].max_weight, 30000.0)
 
     def test_service_features_are_loaded(self):
         """Expose services.csv feature tokens as Karrio ServiceLevelFeatures."""
@@ -69,23 +87,47 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             for service in provider_units.DEFAULT_SERVICES or []
         }
 
-        tracked_24 = services["TPN24"]
+        tracked_24 = services["tracked_24"]
         self.assertTrue(tracked_24.features.tracked)
         self.assertTrue(tracked_24.features.b2c)
         self.assertTrue(tracked_24.features.b2b)
         self.assertEqual(tracked_24.features.shipment_type, "outbound")
 
-        tracked_returns = services["TSS"]
+        tracked_returns = services["tracked_returns_48"]
         self.assertTrue(tracked_returns.features.tracked)
         self.assertEqual(tracked_returns.features.shipment_type, "returns")
 
+    def test_resolve_service_code(self):
+        """Resolve aliases, carrier codes, and friendly names to canonical Karrio service codes."""
+        scenarios = [
+            ("tracked_24", "tracked_24"),
+            ("TPN24", "tracked_24"),
+            ("Tracked 24", "tracked_24"),
+            ("Tracked 24 (01 / 214655TN)", "tracked_24"),
+            ("tracked_returns_48", "tracked_returns_48"),
+            ("TSS", "tracked_returns_48"),
+            ("Tracked Returns 48", "tracked_returns_48"),
+            ("01", None),
+            ("not_a_service", None),
+        ]
+
+        for selector, expected in scenarios:
+            with self.subTest(selector=selector):
+                self.assertEqual(
+                    provider_units.resolve_service_code(selector),
+                    expected,
+                )
+
     def test_resolve_carrier_service(self):
-        """Resolve service aliases and direct service codes, but not raw register codes."""
+        """Resolve service aliases, friendly names, and direct carrier codes to Royal Mail API service codes."""
         scenarios = [
             ("tracked_24", "TPN24"),
             ("TPN24", "TPN24"),
+            ("Tracked 24", "TPN24"),
+            ("Tracked 24 (01 / 214655TN)", "TPN24"),
             ("tracked_returns_48", "TSS"),
             ("TSS", "TSS"),
+            ("Tracked Returns 48", "TSS"),
             ("1", None),
             ("01", None),
             ("not_a_service", None),
@@ -101,10 +143,15 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
     def test_resolve_service_register_code(self):
         """Resolve serviceRegisterCode from the CSV service catalog."""
         scenarios = [
-            ("tracked_24", fixture.ExpectedServiceRegisterCodes["TPN24"]),
-            ("TPN24", fixture.ExpectedServiceRegisterCodes["TPN24"]),
-            ("tracked_returns_48", fixture.ExpectedServiceRegisterCodes["TSS"]),
-            ("TSS", fixture.ExpectedServiceRegisterCodes["TSS"]),
+            ("tracked_24", fixture.ExpectedServiceRegisterCodes["tracked_24"]),
+            ("TPN24", fixture.ExpectedServiceRegisterCodes["tracked_24"]),
+            ("Tracked 24", fixture.ExpectedServiceRegisterCodes["tracked_24"]),
+            (
+                "tracked_returns_48",
+                fixture.ExpectedServiceRegisterCodes["tracked_returns_48"],
+            ),
+            ("TSS", fixture.ExpectedServiceRegisterCodes["tracked_returns_48"]),
+            ("Tracked Returns 48", fixture.ExpectedServiceRegisterCodes["tracked_returns_48"]),
             ("not_a_service", None),
         ]
 
@@ -117,11 +164,11 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
 
     def test_return_service_detection(self):
         """Identify return services correctly."""
-        for selector in ["tracked_returns_48", "TSS", "RT0", "RTA"]:
+        for selector in ["tracked_returns_48", "TSS", "Tracked Returns 48", "RT0", "RTA"]:
             with self.subTest(selector=selector):
                 self.assertTrue(provider_units.is_return_service(selector))
 
-        for selector in ["tracked_24", "TPN24", "FE0"]:
+        for selector in ["tracked_24", "TPN24", "Tracked 24", "FE0", "express_48"]:
             with self.subTest(selector=selector):
                 self.assertFalse(provider_units.is_return_service(selector))
 
@@ -155,4 +202,9 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertTrue(options.receive_email_notification.state)
         self.assertEqual(options.air_number.state, "UKIMS123")
 
+    def test_legacy_royalmail_mapper_alias_exposes_capabilities(self):
+        """Expose capabilities through legacy `karrio.mappers.royalmail` lookups."""
+        capabilities = references.get_carrier_capabilities("royalmail")
 
+        for capability in ["rating", "shipping", "tracking", "manifest"]:
+            self.assertIn(capability, capabilities)

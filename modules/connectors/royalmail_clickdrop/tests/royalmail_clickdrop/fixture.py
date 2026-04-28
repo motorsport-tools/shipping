@@ -15,12 +15,12 @@ gateway = karrio.gateway["royalmail"].create(
     {
         "id": "123456789",
         "carrier_id": "royalmail",
-        "api_key": "CLICKDROP_API_KEY",
+        "click_and_drop_api_key": "CLICKDROP_API_KEY",
         "tracking_client_id": "ROYALMAIL_TRACKING_CLIENT_ID",
         "tracking_client_secret": "ROYALMAIL_TRACKING_CLIENT_SECRET",
         "config": {
-            "base_url": "https://api.parcel.royalmail.com/api/v1",
-            "tracking_base_url": "https://api.royalmail.net",
+            "click_and_drop_api_base_url": "https://api.parcel.royalmail.com/api/v1",
+            "tracking_api_base_url": "https://api.royalmail.net",
         },
     }
 )
@@ -1843,14 +1843,15 @@ ParsedReturnShipmentErrorResponse = [
 # Service / settings expectations
 # ---------------------------------------------------------------------------
 
-ExpectedCoreServices = ["TPN24", "FE0"]
-ExpectedReturnServices = ["TSS"]
+ExpectedCoreServices = ["tracked_24", "express_48"]
+ExpectedReturnServices = ["tracked_returns_48"]
 ExpectedServiceRegisterCodes = {
-    "TPN24": "01",
-    "TSS": "01",
+    "tracked_24": "01",
+    "tracked_returns_48": "01",
 }
 ExpectedDefaultConnectionConfig = {
-    "base_url": "https://api.parcel.royalmail.com/api/v1",
+    "click_and_drop_api_base_url": "https://api.parcel.royalmail.com/api/v1",
+    "tracking_api_base_url": "https://api.royalmail.net",
     "label_type": "PDF",
 }
 
@@ -2074,13 +2075,13 @@ RateResponse = {
         {
             "carrier_id": "royalmail",
             "carrier_name": "royalmail",
-            "service": "TPN24",
+            "service": "tracked_24",
             "currency": "GBP",
             "total_charge": 8.5,
             "transit_days": 1,
             "meta": {
-                "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
-                "carrier_service_code": "01",
+                "service_name": "Tracked 24 (01 / 214655TN)",
+                "carrier_service_code": "TPN24",
                 "rate_provider": "rate_table",
             },
         }
@@ -2098,13 +2099,13 @@ ParsedRateResponse = [
         {
             "carrier_id": "royalmail",
             "carrier_name": "royalmail",
-            "service": "TPN24",
+            "service": "tracked_24",
             "currency": "GBP",
             "total_charge": 8.5,
             "transit_days": 1,
             "meta": {
-                "service_name": "Royal Mail Tracked 24 (01 / 214708C1)",
-                "carrier_service_code": "01",
+                "service_name": "Tracked 24 (01 / 214655TN)",
+                "carrier_service_code": "TPN24",
                 "rate_provider": "rate_table",
             },
         }
@@ -2339,7 +2340,7 @@ ParsedReturnServicesResponse = [
                 "carrierGuid": "carrier-guid-1",
                 "carrierServiceGuid": "service-guid-1",
                 "serviceName": "Tracked Returns 48",
-                "serviceCode": "TSS",
+                "serviceCode": "tracked_returns_48",
             }
         ]
     },

@@ -1,4 +1,3 @@
- 
 """Royal Mail Click and Drop carrier settings tests."""
 
 import copy
@@ -21,7 +20,7 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
                 id="123456789",
                 test_mode=False,
                 carrier_id="royalmail",
-                api_key="TEST_API_KEY",
+                click_and_drop_api_key="TEST_API_KEY",
                 config=config or {},
             )
         )
@@ -32,7 +31,11 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
 
         self.assertEqual(
             gateway.settings.server_url,
-            fixture.ExpectedDefaultConnectionConfig["base_url"],
+            fixture.ExpectedDefaultConnectionConfig["click_and_drop_api_base_url"],
+        )
+        self.assertEqual(
+            gateway.settings.tracking_server_url,
+            fixture.ExpectedDefaultConnectionConfig["tracking_api_base_url"],
         )
         self.assertEqual(gateway.settings.authorization, "Bearer TEST_API_KEY")
         self.assertEqual(
@@ -43,18 +46,29 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
         self.assertIsInstance(gateway.settings.config, dict)
 
     def test_server_url_uses_connection_config_base_url(self):
-        """Normalize configured base_url overrides consistently."""
+        """Normalize configured Click & Drop API base URL overrides consistently."""
         gateway = self._gateway(
-            config={"base_url": "https://example.test/custom/api/"}
+            config={"click_and_drop_api_base_url": "https://example.test/custom/api/"}
         )
 
         self.assertEqual(
-            gateway.settings.connection_config.base_url.state,
+            gateway.settings.connection_config.click_and_drop_api_base_url.state,
             "https://example.test/custom/api/",
         )
         self.assertEqual(
             gateway.settings.server_url,
             "https://example.test/custom/api",
+        )
+
+    def test_server_url_accepts_legacy_base_url_key(self):
+        """Remain backward compatible with older `base_url` config payloads."""
+        gateway = self._gateway(
+            config={"base_url": "https://legacy.example.test/custom/api/"}
+        )
+
+        self.assertEqual(
+            gateway.settings.server_url,
+            "https://legacy.example.test/custom/api",
         )
 
     def test_connection_config_label_flags_flow_into_shipment_request(self):
@@ -66,7 +80,9 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
             }
         )
 
-        shipment = models.ShipmentRequest(**copy.deepcopy(fixture.ShipmentPayloadWithoutBilling))
+        shipment = models.ShipmentRequest(
+            **copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
+        )
         request = gateway.mapper.create_shipment_request(shipment)
         serialized = lib.to_dict(request.serialize())
 
@@ -135,5 +151,3 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
             manifest_serialized,
             {"carrierName": "Royal Mail Default"},
         )
-
-
