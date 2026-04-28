@@ -1,120 +1,120 @@
 service_code,service_name,carrier_service_code,features,zone_label,country_codes,min_weight,max_weight,max_length,max_width,max_height,currency,weight_unit,dimension_unit,transit_days,domicile,international
-BPL1,Royal Mail 1st Class (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,KG,CM,1,true,false
-BPL2,Royal Mail 2nd Class (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,KG,CM,2,true,false
-BPR1,Royal Mail 1st Class Signed For (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,KG,CM,1,true,false
-BPR2,Royal Mail 2nd Class Signed For (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,KG,CM,2,true,false
-BYD,International Tracked Heavy Weight Premium (01 / Y5013288),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-BYH,International Tracked Heavy Weight Premium Extra Compensation (01 / Y5013288),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-CRL24,Royal Mail 24 (01 / 214655C1),01,b2c:b2b,,GB,0.001,2000,,,,GBP,KG,CM,1,true,false
-CRL48,Royal Mail 48 (01 / 214655C1),01,b2c:b2b,Domestic,GB,0.001,2000,,,,GBP,KG,CM,2,true,false
-DE4,International Business Parcel Zero Sort Low Volume Priority (01 / X1006082),01,b2c:b2b,Domestic,,0.001,30000,,,,GBP,KG,CM,,false,true
-DE6,International Business Parcel Untracked DDP (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-DG4,International Business Mail Large Letter Country Sort Low Volume Priority (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-DP3,International Business Mail Untracked Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-EC1,globalpriority Europe Comp 1 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-EC2,globalpriority Europe Comp 2 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-EC3,globalpriority Europe Comp 3 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-ECA,globalpriority Europe (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-ER1,europriority DTP IOSS Comp 1 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-ER2,europriority DTP IOSS Comp 2 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-ER3,europriority DTP IOSS Comp 3 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-ERA,europriority DTP IOSS (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-FE0,express48 (01 / 915178F0),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-FE1,express48 Comp 1 (01 / 915178F1),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-FE2,express48 Comp 2 (01 / 915178F2),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-FE3,express48 Comp 3 (01 / 915178F3),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-FEE,expressAM (01 / 915178FE),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-FEF,expressAM Comp 1 (01 / 915178FF),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-FEG,expressAM Comp 2 (01 / 915178FG),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-FEL,expressAM Comp 3 (01 / 915178FL),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-FEM,express48 Large (01 / 915178FM),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-FEN,express48 Large Comp 1 (01 / 915178FN),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-FEO,express48 Large Comp 2 (01 / 915178FO),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-FEP,express48 Large Comp 3 (01 / 915178FP),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-GP1,globalpriority ROW Comp 1 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-GP2,globalpriority ROW Comp 2 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-GP3,globalpriority ROW Comp 3 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-GPA,globalpriority ROW (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-IE1,International Business Parcel Zone Sort Priority (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-IG1,International Business Mail Large Letter Zone Sort Priority (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-IG4,International Business Mail Large Letter Zone Sort Priority Machineable (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-LLG,International Tracked and Signed PPI (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-LLH,International Tracked PPI (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-LLI,International Signed For PPI (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MP1,International Business Parcel Tracked (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MP4,International Business Parcel Tracked Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MP5,International Business Parcel Signed (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MP6,International Business Parcel Signed Extra Compensation (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MP7,International Business Parcel Tracked Country Priced (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MP9,International Business Parcel Signed Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MPL,International Business Mail Tracked High Volume (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MPM,International Business Mail Tracked & Signed High Volume (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MPN,International Business Mail Signed Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MPO,International Business Mail Tracked High Volume Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MPP,International Business Mail Tracked & Signed High Volume Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MPR,International Business Parcel Tracked DDP (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTA,International Business Parcel Tracked & Signed (01 / Q1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTB,International Business Parcel Tracked & Signed Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTC,International Business Mail Tracked & Signed (01 / Q1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTD,International Business Mail Tracked & Signed Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTE,International Business Parcel Tracked & Signed Country (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTG,International Business Mail Tracked & Signed Country (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTI,International Business Mail Tracked (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTJ,International Business Mail Tracked Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTK,International Business Mail Tracked Country Priced (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTM,International Business Mail Signed (01 / Q1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTN,International Business Mail Signed Extra Compensation (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTO,International Business Mail Signed Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-MTP,International Business Mail Signed Extra Compensation Country (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-NDA,express24 (01 / 915178NA),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-NDB,express24 Comp 1 (01 / 915178NB),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-NDC,express24 Comp 2 (01 / 915178NC),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-NDE,express24 Comp 3 (01 / 915178NE),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-OLA,International Standard On Account (01 / D1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-OLS,International Economy On Account (01 / D1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-OSA,International Signed On Account (01),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-OSB,International Signed On Account Extra Compensation (01),01,b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-OTA,International Tracked On Account (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-OTB,International Tracked On Account Extra Compensation (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-OTC,International Tracked & Signed On Account (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-OTD,International Tracked & Signed On Account Extra Compensation (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,KG,CM,,false,true
-RT0,express24 Returns (01 / 915178R0),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-RT1,express24 Returns Comp 1 (01 / 915178R1),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-RT2,express24 Returns Comp 2 (01 / 915178R2),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-RT3,express24 Returns Comp 3 (01 / 915178R3),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-RTA,express48 Returns (01 / 915178RA),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-RTB,express48 Returns Comp 1 (01 / 915178RB),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-RTC,express48 Returns Comp 2 (01 / 915178RC),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-RTD,express48 Returns Comp 3 (01 / 915178RD),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-SD1,Special Delivery Guaranteed by 1pm - £750 (01 / 214655R5),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SD2,Special Delivery Guaranteed by 1pm - £1000 (01 / 214655R4),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SD3,Special Delivery Guaranteed by 1pm - £2500 (01 / 214655R7),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SD4,Special Delivery Guaranteed by 9am - £750 (01 / 214655X0),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SD5,Special Delivery Guaranteed by 9am - £1000 (01 / 214655X0),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SD6,Special Delivery Guaranteed by 9am - £2500 (01 / 214655X0),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDA,Special Delivery Guaranteed by 1pm (ID) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDB,Special Delivery Guaranteed by 1pm (ID) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDC,Special Delivery Guaranteed by 1pm (ID) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDE,Special Delivery Guaranteed by 9am (ID) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDF,Special Delivery Guaranteed by 9am (ID) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDG,Special Delivery Guaranteed by 9am (ID) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDH,Special Delivery Guaranteed by 1pm (AGE) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDJ,Special Delivery Guaranteed by 1pm (AGE) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDK,Special Delivery Guaranteed by 1pm (AGE) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDM,Special Delivery Guaranteed by 9am (AGE) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDN,Special Delivery Guaranteed by 9am (AGE) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDQ,Special Delivery Guaranteed by 9am (AGE) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDV,Special Delivery Guaranteed Age £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDW,Special Delivery Guaranteed Age £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDX,Special Delivery Guaranteed Age £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDY,Special Delivery Guaranteed ID £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SDZ,Special Delivery Guaranteed ID £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SEA,Special Delivery Guaranteed ID £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SEB,Special Delivery Guaranteed £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SEC,Special Delivery Guaranteed £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-SED,Special Delivery Guaranteed £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-STL1,1st Class Account Mail (01 / 214655X0),01,b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,1,true,false
-STL2,2nd Class Account Mail (01 / 214655X0),01,b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,KG,CM,2,true,false
-TPN24,Tracked 24 (01 / 214655TN),01,tracked:b2c:b2b,Domestic,GB,0.001,2000,,,,GBP,KG,CM,1,true,false
-TRN24,Royal Mail Tracked 24 LBT (01 / 214655RN),01,tracked:b2c:b2b,Domestic,GB,0.001,2000,,,,GBP,KG,CM,1,true,false
-TSS,Tracked Returns 48 (01 / 214655SS),01,return:tracked,Domestic,GB,0.001,2000,,,,GBP,KG,CM,2,true,false
+BPL1,Royal Mail 1st Class (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,G,CM,1,true,false
+BPL2,Royal Mail 2nd Class (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,G,CM,2,true,false
+BPR1,Royal Mail 1st Class Signed For (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,G,CM,1,true,false
+BPR2,Royal Mail 2nd Class Signed For (01),01,b2c:b2b,Domestic,GB,,,,,,GBP,G,CM,2,true,false
+BYD,International Tracked Heavy Weight Premium (01 / Y5013288),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+BYH,International Tracked Heavy Weight Premium Extra Compensation (01 / Y5013288),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+CRL24,Royal Mail 24 (01 / 214655C1),01,b2c:b2b,,GB,0.001,2000,,,,GBP,G,CM,1,true,false
+CRL48,Royal Mail 48 (01 / 214655C1),01,b2c:b2b,Domestic,GB,0.001,2000,,,,GBP,G,CM,2,true,false
+DE4,International Business Parcel Zero Sort Low Volume Priority (01 / X1006082),01,b2c:b2b,Domestic,,0.001,30000,,,,GBP,G,CM,,false,true
+DE6,International Business Parcel Untracked DDP (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+DG4,International Business Mail Large Letter Country Sort Low Volume Priority (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+DP3,International Business Mail Untracked Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+EC1,globalpriority Europe Comp 1 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+EC2,globalpriority Europe Comp 2 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+EC3,globalpriority Europe Comp 3 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+ECA,globalpriority Europe (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+ER1,europriority DTP IOSS Comp 1 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+ER2,europriority DTP IOSS Comp 2 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+ER3,europriority DTP IOSS Comp 3 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+ERA,europriority DTP IOSS (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+FE0,express48 (01 / 915178F0),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+FE1,express48 Comp 1 (01 / 915178F1),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+FE2,express48 Comp 2 (01 / 915178F2),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+FE3,express48 Comp 3 (01 / 915178F3),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+FEE,expressAM (01 / 915178FE),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+FEF,expressAM Comp 1 (01 / 915178FF),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+FEG,expressAM Comp 2 (01 / 915178FG),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+FEL,expressAM Comp 3 (01 / 915178FL),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+FEM,express48 Large (01 / 915178FM),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+FEN,express48 Large Comp 1 (01 / 915178FN),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+FEO,express48 Large Comp 2 (01 / 915178FO),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+FEP,express48 Large Comp 3 (01 / 915178FP),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+GP1,globalpriority ROW Comp 1 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+GP2,globalpriority ROW Comp 2 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+GP3,globalpriority ROW Comp 3 (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+GPA,globalpriority ROW (01 / Y5013288),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+IE1,International Business Parcel Zone Sort Priority (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+IG1,International Business Mail Large Letter Zone Sort Priority (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+IG4,International Business Mail Large Letter Zone Sort Priority Machineable (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+LLG,International Tracked and Signed PPI (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+LLH,International Tracked PPI (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+LLI,International Signed For PPI (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MP1,International Business Parcel Tracked (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MP4,International Business Parcel Tracked Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MP5,International Business Parcel Signed (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MP6,International Business Parcel Signed Extra Compensation (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MP7,International Business Parcel Tracked Country Priced (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MP9,International Business Parcel Signed Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MPL,International Business Mail Tracked High Volume (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MPM,International Business Mail Tracked & Signed High Volume (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MPN,International Business Mail Signed Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MPO,International Business Mail Tracked High Volume Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MPP,International Business Mail Tracked & Signed High Volume Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MPR,International Business Parcel Tracked DDP (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTA,International Business Parcel Tracked & Signed (01 / Q1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTB,International Business Parcel Tracked & Signed Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTC,International Business Mail Tracked & Signed (01 / Q1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTD,International Business Mail Tracked & Signed Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTE,International Business Parcel Tracked & Signed Country (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTG,International Business Mail Tracked & Signed Country (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTI,International Business Mail Tracked (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTJ,International Business Mail Tracked Extra Compensation (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTK,International Business Mail Tracked Country Priced (01 / X1006082),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTM,International Business Mail Signed (01 / Q1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTN,International Business Mail Signed Extra Compensation (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTO,International Business Mail Signed Country Priced (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+MTP,International Business Mail Signed Extra Compensation Country (01 / X1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+NDA,express24 (01 / 915178NA),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+NDB,express24 Comp 1 (01 / 915178NB),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+NDC,express24 Comp 2 (01 / 915178NC),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+NDE,express24 Comp 3 (01 / 915178NE),01,tracked:b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+OLA,International Standard On Account (01 / D1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+OLS,International Economy On Account (01 / D1006082),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+OSA,International Signed On Account (01),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+OSB,International Signed On Account Extra Compensation (01),01,b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+OTA,International Tracked On Account (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+OTB,International Tracked On Account Extra Compensation (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+OTC,International Tracked & Signed On Account (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+OTD,International Tracked & Signed On Account Extra Compensation (01),01,tracked:b2c:b2b,International,,0.001,30000,,,,GBP,G,CM,,false,true
+RT0,express24 Returns (01 / 915178R0),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+RT1,express24 Returns Comp 1 (01 / 915178R1),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+RT2,express24 Returns Comp 2 (01 / 915178R2),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+RT3,express24 Returns Comp 3 (01 / 915178R3),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+RTA,express48 Returns (01 / 915178RA),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+RTB,express48 Returns Comp 1 (01 / 915178RB),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+RTC,express48 Returns Comp 2 (01 / 915178RC),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+RTD,express48 Returns Comp 3 (01 / 915178RD),01,return:tracked,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+SD1,Special Delivery Guaranteed by 1pm - £750 (01 / 214655R5),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SD2,Special Delivery Guaranteed by 1pm - £1000 (01 / 214655R4),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SD3,Special Delivery Guaranteed by 1pm - £2500 (01 / 214655R7),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SD4,Special Delivery Guaranteed by 9am - £750 (01 / 214655X0),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SD5,Special Delivery Guaranteed by 9am - £1000 (01 / 214655X0),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SD6,Special Delivery Guaranteed by 9am - £2500 (01 / 214655X0),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDA,Special Delivery Guaranteed by 1pm (ID) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDB,Special Delivery Guaranteed by 1pm (ID) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDC,Special Delivery Guaranteed by 1pm (ID) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDE,Special Delivery Guaranteed by 9am (ID) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDF,Special Delivery Guaranteed by 9am (ID) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDG,Special Delivery Guaranteed by 9am (ID) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDH,Special Delivery Guaranteed by 1pm (AGE) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDJ,Special Delivery Guaranteed by 1pm (AGE) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDK,Special Delivery Guaranteed by 1pm (AGE) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDM,Special Delivery Guaranteed by 9am (AGE) - £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDN,Special Delivery Guaranteed by 9am (AGE) - £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDQ,Special Delivery Guaranteed by 9am (AGE) - £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDV,Special Delivery Guaranteed Age £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDW,Special Delivery Guaranteed Age £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDX,Special Delivery Guaranteed Age £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDY,Special Delivery Guaranteed ID £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SDZ,Special Delivery Guaranteed ID £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SEA,Special Delivery Guaranteed ID £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SEB,Special Delivery Guaranteed £750 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SEC,Special Delivery Guaranteed £1000 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+SED,Special Delivery Guaranteed £2500 (01),01,tracked:b2c:b2b:express,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+STL1,1st Class Account Mail (01 / 214655X0),01,b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,1,true,false
+STL2,2nd Class Account Mail (01 / 214655X0),01,b2c:b2b,Domestic,GB,0.001,30000,,,,GBP,G,CM,2,true,false
+TPN24,Tracked 24 (01 / 214655TN),01,tracked:b2c:b2b,Domestic,GB,0.001,2000,,,,GBP,G,CM,1,true,false
+TRN24,Royal Mail Tracked 24 LBT (01 / 214655RN),01,tracked:b2c:b2b,Domestic,GB,0.001,2000,,,,GBP,G,CM,1,true,false
+TSS,Tracked Returns 48 (01 / 214655SS),01,return:tracked,Domestic,GB,0.001,2000,,,,GBP,G,CM,2,true,false

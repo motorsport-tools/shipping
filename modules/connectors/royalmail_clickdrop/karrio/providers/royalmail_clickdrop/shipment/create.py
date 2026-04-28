@@ -184,6 +184,20 @@ def _to_bool(value, default=None):
 
     return bool(value)
 
+def _parse_error_message(
+    settings: provider_utils.Settings,
+    code: str,
+    message: str,
+    operation: str,
+) -> models.Message:
+    return models.Message(
+        carrier_id=settings.carrier_id,
+        carrier_name=settings.carrier_name,
+        code=code,
+        message=message,
+        details={"operation": operation},
+    )
+
 def _validate_billing_address(billing, source_label="billing"):
     if not billing:
         return
@@ -239,6 +253,22 @@ def _billing_email_address(billing) -> typing.Optional[str]:
     )
 
 
+def _normalize_notification_target(value) -> typing.Optional[str]:
+    if value in [None, ""]:
+        return None
+
+    normalized = str(value).strip()
+    mapped = provider_units.NotificationTarget.map(normalized)
+
+    if getattr(mapped, "enum", None) is None:
+        mapped = provider_units.NotificationTarget.map(normalized.lower())
+
+    if getattr(mapped, "enum", None) is None:
+        return None
+
+    return mapped.value_or_key
+
+
 def _resolve_notification_target(
     raw_options,
     options,
@@ -247,17 +277,46 @@ def _resolve_notification_target(
     billing,
 ) -> typing.Optional[str]:
     explicit_target = _first_present(
-        _value(
-            raw_options,
-            "send_notifications_to",
-            "sendNotificationsTo",
-            "email_notification_to",
-        ),
+        _value(raw_options, "send_notifications_to", "sendNotificationsTo"),
         options.send_notifications_to.state,
+    )
+
+    if explicit_target not in [None, ""]:
+        normalized_target = _normalize_notification_target(explicit_target)
+
+        if normalized_target is None:
+            raise ValueError(
+                "Royal Mail Click & Drop `send_notifications_to` must be one of "
+                "`recipient`, `sender`, or `billing`."
+            )
+
+        return normalized_target
+
+    explicit_email = _first_present(
+        _value(raw_options, "email_notification_to"),
         options.email_notification_to.state,
     )
-    if explicit_target not in [None, ""]:
-        return explicit_target
+
+    if explicit_email not in [None, ""]:
+        normalized_target = _normalize_notification_target(explicit_email)
+        if normalized_target is not None:
+            return normalized_target
+
+        lookup = {
+            (recipient.email or "").strip().lower(): "recipient",
+            (shipper.email or "").strip().lower(): "sender",
+            (_billing_email_address(billing) or "").strip().lower(): "billing",
+        }
+        resolved = lookup.get(str(explicit_email).strip().lower())
+
+        if resolved is None:
+            raise ValueError(
+                "Royal Mail Click & Drop does not support arbitrary "
+                "`email_notification_to` addresses. Use `send_notifications_to` "
+                "or provide an email matching recipient, sender, or billing."
+            )
+
+        return resolved
 
     for target, email in [
         ("recipient", recipient.email),
@@ -278,7 +337,6 @@ def _notification_target_has_email(target, recipient, shipper, billing) -> bool:
     }
 
     return email_by_target.get(target) not in [None, ""]
-
 
 def _resolve_email_notification(
     raw_options,
@@ -900,6 +958,16 @@ def parse_shipment_response(
     if shipment is None and any(messages):
         return None, messages
 
+    if shipment is None:
+        return None, [
+            _parse_error_message(
+                settings,
+                code="shipment_parse_error",
+                message="Unable to parse Royal Mail Click & Drop shipment response",
+                operation="create_shipment",
+            )
+        ]
+
     return shipment, messages
 
 
@@ -1075,23 +1143,89 @@ def shipment_request(
     other_costs = options.other_costs.state
     order_tax = _coalesce(options.order_tax.state, 0.0)
     customs_duty = options.customs_duty_costs.state
-    serialized_customs_duty = (
+
+    customs_duty_to_serialize = (
         customs_duty
         if customs is not None and getattr(customs, "incoterm", None) == "DDP"
         else None
     )
+
+    serialized_subtotal = _quantize_money(
+        subtotal,
+        field="subtotal",
+        default=None,
+        minimum=Decimal("0.00"),
+        maximum=Decimal("999999.00"),
+    )
+    serialized_shipping_cost = _quantize_money(
+        shipping_cost,
+        field="shippingCostCharged",
+        default=0.0,
+        minimum=Decimal("0.00"),
+        maximum=Decimal("999999.00"),
+    )
+    serialized_other_costs = (
+        _quantize_money(
+            other_costs,
+            field="otherCosts",
+            default=None,
+            minimum=Decimal("0.00"),
+            maximum=Decimal("999999.00"),
+        )
+        if other_costs is not None
+        else None
+    )
+    serialized_order_tax = _quantize_money(
+        order_tax,
+        field="orderTax",
+        default=0.0,
+        minimum=Decimal("0.00"),
+        maximum=Decimal("999999.00"),
+    )
+    serialized_customs_duty = (
+        _quantize_money(
+            customs_duty_to_serialize,
+            field="customsDutyCosts",
+            default=None,
+            minimum=Decimal("0.00"),
+            maximum=Decimal("99999.99"),
+        )
+        if customs_duty_to_serialize is not None
+        else None
+    )
+
     total = _coalesce(
         options.total.state,
         (
-            float(subtotal)
-            + float(shipping_cost or 0.0)
-            + float(order_tax or 0.0)
-            + float(other_costs or 0.0)
+            float(serialized_subtotal or 0.0)
+            + float(serialized_shipping_cost or 0.0)
+            + float(serialized_order_tax or 0.0)
+            + float(serialized_other_costs or 0.0)
             + float(serialized_customs_duty or 0.0)
         )
-        if subtotal is not None
+        if serialized_subtotal is not None
         else None,
     )
+    serialized_total = _quantize_money(
+        total,
+        field="total",
+        default=None,
+        minimum=Decimal("0.00"),
+        maximum=Decimal("999999.00"),
+    )
+
+    if serialized_subtotal is None:
+        raise ValueError(
+            "Royal Mail Click & Drop requires `subtotal`. "
+            "Provide `options.subtotal` or parcel/customs item values."
+        )
+
+    if serialized_total is None:
+        raise ValueError(
+            "Royal Mail Click & Drop requires `total`. "
+            "Provide `options.total` or enough order values to derive it."
+        )
+
     currency = _resolve_currency_code(
         payload,
         packages,
@@ -1142,20 +1276,48 @@ def shipment_request(
         != (recipient.country_code or "").upper()
     )
     include_label_in_response = _coalesce(
-        options.include_label_in_response.state,
-        settings.connection_config.include_label_in_response.state,
+        _to_bool(options.include_label_in_response.state),
+        _to_bool(settings.connection_config.include_label_in_response.state),
         True,
     )
     include_cn = (
-        True if is_international else (True if options.include_cn.state is True else None)
+        True
+        if is_international
+        else (True if _to_bool(options.include_cn.state) is True else None)
     )
-    include_returns_label = options.include_returns_label.state
+    include_returns_label = _to_bool(options.include_returns_label.state)
     if include_returns_label is None:
         include_returns_label = (
             True
-            if settings.connection_config.include_return_label_in_response.state
+            if _to_bool(
+                settings.connection_config.include_return_label_in_response.state,
+                False,
+            )
+            is True
             else None
         )
+
+    consequential_loss = _bounded_int(
+        options.consequential_loss.state,
+        field="consequentialLoss",
+        default=None,
+        minimum=0,
+        maximum=10000,
+    )
+    receive_sms_notification = _coalesce(
+        _to_bool(options.receive_sms_notification.state),
+        _to_bool(options.sms_notification.state),
+        False,
+    )
+    request_signature_upon_delivery = _to_bool(
+        options.request_signature_upon_delivery.state
+    )
+    is_local_collect = _to_bool(options.is_local_collect.state)
+    requires_export_license = _to_bool(options.requires_export_license.state)
+    contains_dangerous_goods = _coalesce(
+        _to_bool(options.contains_dangerous_goods.state),
+        _to_bool(options.dangerous_good.state),
+    )
 
     request = royalmail_clickdrop_req.ShipmentRequestType(
         items=[
@@ -1200,56 +1362,18 @@ def shipment_request(
                 orderDate=order_date,
                 plannedDespatchDate=planned_despatch_date,
                 specialInstructions=special_instructions,
-                subtotal=_quantize_money(
-                    subtotal,
-                    field="subtotal",
-                    default=None,
-                    minimum=Decimal("0.00"),
-                    maximum=Decimal("999999.00"),
-                ),
-                shippingCostCharged=_quantize_money(
-                    shipping_cost,
-                    field="shippingCostCharged",
-                    default=0.0,
-                    minimum=Decimal("0.00"),
-                    maximum=Decimal("999999.00"),
-                ),
-                otherCosts=(
-                    _quantize_money(
-                        other_costs,
-                        field="otherCosts",
-                        default=None,
-                        minimum=Decimal("0.00"),
-                        maximum=Decimal("999999.00"),
-                    )
-                    if other_costs is not None
-                    else None
-                ),
-                customsDutyCosts=(
-                    _quantize_money(
-                        serialized_customs_duty,
-                        field="customsDutyCosts",
-                        default=None,
-                        minimum=Decimal("0.00"),
-                        maximum=Decimal("99999.99"),
-                    )
-                    if serialized_customs_duty is not None
-                    else None
-                ),
-                total=_quantize_money(
-                    total,
-                    field="total",
-                    default=None,
-                    minimum=Decimal("0.00"),
-                    maximum=Decimal("999999.00"),
-                ),
+                subtotal=serialized_subtotal,
+                shippingCostCharged=serialized_shipping_cost,
+                otherCosts=serialized_other_costs,
+                customsDutyCosts=serialized_customs_duty,
+                total=serialized_total,
                 currencyCode=currency,
                 postageDetails=royalmail_clickdrop_req.PostageDetailsType(
                     sendNotificationsTo=send_notifications_to,
                     serviceCode=_text(service_code, max=10),
                     carrierName=_text(carrier_name, max=50),
                     serviceRegisterCode=_text(service_register_code, max=2),
-                    consequentialLoss=options.consequential_loss.state,
+                    consequentialLoss=consequential_loss,
                     receiveEmailNotification=_resolve_email_notification(
                         raw_options,
                         send_notifications_to,
@@ -1257,13 +1381,9 @@ def shipment_request(
                         shipper,
                         billing,
                     ),
-                    receiveSmsNotification=_coalesce(
-                        options.receive_sms_notification.state,
-                        options.sms_notification.state,
-                        False,
-                    ),
-                    requestSignatureUponDelivery=options.request_signature_upon_delivery.state,
-                    isLocalCollect=options.is_local_collect.state,
+                    receiveSmsNotification=receive_sms_notification,
+                    requestSignatureUponDelivery=request_signature_upon_delivery,
+                    isLocalCollect=is_local_collect,
                     safePlace=_text(options.safe_place.state, max=90),
                     department=_text(options.department.state, max=150),
                     AIRNumber=(
@@ -1284,7 +1404,7 @@ def shipment_request(
                         ),
                         max=50,
                     ),
-                    requiresExportLicense=options.requires_export_license.state,
+                    requiresExportLicense=requires_export_license,
                     commercialInvoiceNumber=_text(commercial_invoice_number, max=35),
                     commercialInvoiceDate=commercial_invoice_date,
                     recipientEoriNumber=_text(
@@ -1310,17 +1430,8 @@ def shipment_request(
                     includeCN=include_cn,
                     includeReturnsLabel=include_returns_label,
                 ),
-                orderTax=_quantize_money(
-                    order_tax,
-                    field="orderTax",
-                    default=0.0,
-                    minimum=Decimal("0.00"),
-                    maximum=Decimal("999999.00"),
-                ),
-                containsDangerousGoods=_coalesce(
-                    options.contains_dangerous_goods.state,
-                    options.dangerous_good.state,
-                ),
+                orderTax=serialized_order_tax,
+                containsDangerousGoods=contains_dangerous_goods,
                 dangerousGoodsUnCode=_text(
                     options.dangerous_goods_un_code.state,
                     max=4,

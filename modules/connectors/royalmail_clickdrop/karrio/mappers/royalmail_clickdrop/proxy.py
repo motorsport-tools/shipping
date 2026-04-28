@@ -26,28 +26,38 @@ def _normalize_query(query: typing.Optional[dict]) -> str:
 
         normalized[key] = value
 
-    return urlencode(normalized)
+    return urlencode(normalized, safe=",")
 
 def _signature_url(
-        settings: provider_settings.Settings,
-        tracking_number: str,
-        events_data: dict,
-    ) -> typing.Optional[str]:
-        mail_piece = (events_data or {}).get("mailPieces") or {}
-        links = mail_piece.get("links") or {}
-        signature_link = (links.get("signature") or {}).get("href")
+    settings: provider_settings.Settings,
+    tracking_number: str,
+    events_data: dict,
+) -> typing.Optional[str]:
+    mail_piece = (events_data or {}).get("mailPieces") or {}
+    if isinstance(mail_piece, list):
+        mail_piece = next(
+            (item for item in mail_piece if isinstance(item, dict)),
+            {},
+        )
 
-        if signature_link:
-            if signature_link.startswith("http"):
-                return signature_link
+    links = mail_piece.get("links") or {}
+    signature_link = (links.get("signature") or {}).get("href")
 
-            return f"{settings.tracking_server_url}{signature_link}"
+    if signature_link:
+        if signature_link.startswith("http"):
+            return signature_link
 
-        signature = mail_piece.get("signature") or {}
-        if any(signature.get(key) for key in ["imageId", "recipientName", "signatureDateTime"]):
-            return f"{settings.tracking_server_url}/mailpieces/v2/{tracking_number}/signature"
+        return f"{settings.tracking_server_url}{signature_link}"
 
-        return None
+    signature = mail_piece.get("signature") or {}
+    if any(signature.get(key) for key in ["imageId", "recipientName", "signatureDateTime"]):
+        mail_piece_id = _tracking_mailpiece_identifier(
+            tracking_number,
+            mail_piece=mail_piece,
+        )
+        return f"{settings.tracking_server_url}/mailpieces/v2/{mail_piece_id}/signature"
+
+    return None
 
 def _chunks(values: typing.List[str], size: int = 30) -> typing.Iterable[typing.List[str]]:
     for index in range(0, len(values), size):
@@ -77,6 +87,24 @@ def _summary_piece_keys(mail_piece: dict) -> typing.List[str]:
         if key
     ]
 
+def _tracking_mailpiece_identifier(
+    tracking_number: str,
+    summary_piece: typing.Optional[dict] = None,
+    mail_piece: typing.Optional[dict] = None,
+) -> str:
+    summary = (summary_piece or {}).get("summary") or {}
+    events_summary = (mail_piece or {}).get("summary") or {}
+
+    return (
+        (mail_piece or {}).get("mailPieceId")
+        or (summary_piece or {}).get("mailPieceId")
+        or events_summary.get("uniqueItemId")
+        or events_summary.get("oneDBarcode")
+        or summary.get("uniqueItemId")
+        or summary.get("oneDBarcode")
+        or tracking_number
+    )
+
 
 def _events_url(
     settings: provider_settings.Settings,
@@ -92,7 +120,13 @@ def _events_url(
 
         return f"{settings.tracking_server_url}{events_link}"
 
-    return f"{settings.tracking_server_url}/mailpieces/v2/{tracking_number}/events"
+    mail_piece_id = _tracking_mailpiece_identifier(
+        tracking_number,
+        summary_piece=summary_piece,
+    )
+
+    return f"{settings.tracking_server_url}/mailpieces/v2/{mail_piece_id}/events"
+
 
 def _summary_piece_has_error(summary_piece: typing.Optional[dict]) -> bool:
     return bool((summary_piece or {}).get("error"))
@@ -299,7 +333,10 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
 
             if (
                 isinstance(summary_data, dict)
-                and any(key in summary_data for key in ["httpCode", "httpMessage"])
+                and any(
+                    key in summary_data
+                    for key in ["httpCode", "httpMessage", "errors"]
+                )
                 and not summary_data.get("mailPieces")
             ):
                 for tracking_number in chunk:
@@ -337,7 +374,7 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
             summary_piece = next(iter(summary_payload.get("mailPieces") or []), None)
 
             if isinstance(summary_payload, dict) and any(
-                key in summary_payload for key in ["httpCode", "httpMessage"]
+                key in summary_payload for key in ["httpCode", "httpMessage", "errors"]
             ):
                 continue
 

@@ -12,6 +12,21 @@ import karrio.schemas.royalmail_clickdrop.manifest_request as manifest_req
 import karrio.schemas.royalmail_clickdrop.manifest_response as manifest_res
 
 
+def _parse_error_message(
+    settings: provider_utils.Settings,
+    code: str,
+    message: str,
+    operation: str,
+) -> models.Message:
+    return models.Message(
+        carrier_id=settings.carrier_id,
+        carrier_name=settings.carrier_name,
+        code=code,
+        message=message,
+        details={"operation": operation},
+    )
+
+
 def _normalize_status(status: typing.Optional[str], has_document: bool) -> str:
     if status:
         return status.strip().lower().replace(" ", "_")
@@ -35,6 +50,16 @@ def parse_manifest_response(
         return None, messages
 
     manifest = _extract_details(response, settings)
+
+    if manifest is None:
+        return None, [
+            _parse_error_message(
+                settings,
+                code="manifest_parse_error",
+                message="Unable to parse Royal Mail Click & Drop manifest response",
+                operation="manifest",
+            )
+        ]
 
     return manifest, messages
 
@@ -96,18 +121,12 @@ def manifest_request(
         or settings.shipping_carrier_name
     )
 
-    # Royal Mail Click & Drop manifest creation is account-level for eligible
-    # orders and the API schema only accepts `carrierName` for this request.
-    #
-    # Karrio's generic ManifestRequest may include `shipment_identifiers`,
-    # but Royal Mail does not support targeting specific shipments here.
-    # We therefore ignore those generic identifiers instead of raising,
-    # and send only the fields defined by the carrier API.
     request = manifest_req.ManifestRequestType(
         carrierName=carrier_name,
     )
 
     return lib.Serializable(request, lib.to_dict)
+
 
 def manifest_identifier_request(
     payload: typing.Any,

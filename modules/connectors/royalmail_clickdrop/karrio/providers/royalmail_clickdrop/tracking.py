@@ -19,10 +19,15 @@ def tracking_request(
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
     requests = [
-        tracking_request_schema.TrackingEventsRequestType(mailPieceId=tracking_number)
+        tracking_request_schema.TrackingEventsRequestType(
+            mailPieceId=str(tracking_number).strip()
+        )
         for tracking_number in (payload.tracking_numbers or [])
         if tracking_number is not None and str(tracking_number).strip() != ""
     ]
+
+    if len(requests) == 0:
+        raise ValueError("Royal Mail tracking requires at least one tracking number.")
 
     return lib.Serializable(
         requests,

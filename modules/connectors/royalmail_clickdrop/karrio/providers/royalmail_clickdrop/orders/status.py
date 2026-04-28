@@ -1,26 +1,43 @@
 """Karrio Royal Mail Click and Drop order status update implementation."""
 
 import typing
-import karrio.lib as lib
+
 import karrio.core.models as models
+import karrio.lib as lib
 import karrio.providers.royalmail_clickdrop.error as error
+import karrio.providers.royalmail_clickdrop.utils as provider_utils
 import karrio.schemas.royalmail_clickdrop.order_status_request as status_req
 import karrio.schemas.royalmail_clickdrop.order_status_response as status_res
-import karrio.providers.royalmail_clickdrop.utils as provider_utils
+
+
+ALLOWED_ORDER_STATUSES = {
+    "new",
+    "despatched",
+    "despatchedByOtherCourier",
+}
+
 
 def _normalize_item(item: typing.Any) -> dict:
     result = {
-        "orderIdentifier": provider_utils.get_value(item, "orderIdentifier") or provider_utils.get_value(item, "order_identifier"),
-        "orderReference": provider_utils.get_value(item, "orderReference") or provider_utils.get_value(item, "order_reference"),
+        "orderIdentifier": provider_utils.get_value(item, "orderIdentifier")
+        or provider_utils.get_value(item, "order_identifier"),
+        "orderReference": provider_utils.get_value(item, "orderReference")
+        or provider_utils.get_value(item, "order_reference"),
         "status": provider_utils.get_value(item, "status"),
-        "trackingNumber": provider_utils.get_value(item, "trackingNumber") or provider_utils.get_value(item, "tracking_number"),
+        "trackingNumber": provider_utils.get_value(item, "trackingNumber")
+        or provider_utils.get_value(item, "tracking_number"),
         "despatchDate": provider_utils.to_datetime_string(
-            provider_utils.get_value(item, "despatchDate") or provider_utils.get_value(item, "despatch_date")
+            provider_utils.get_value(item, "despatchDate")
+            or provider_utils.get_value(item, "despatch_date")
         ),
-        "shippingCarrier": provider_utils.get_value(item, "shippingCarrier") or provider_utils.get_value(item, "shipping_carrier"),
-        "shippingService": provider_utils.get_value(item, "shippingService") or provider_utils.get_value(item, "shipping_service"),
+        "shippingCarrier": provider_utils.get_value(item, "shippingCarrier")
+        or provider_utils.get_value(item, "shipping_carrier"),
+        "shippingService": provider_utils.get_value(item, "shippingService")
+        or provider_utils.get_value(item, "shipping_service"),
     }
+
     return {k: v for k, v in result.items() if v is not None}
+
 
 def _validate_item(item: dict) -> None:
     has_identifier = item.get("orderIdentifier") is not None
@@ -32,8 +49,15 @@ def _validate_item(item: dict) -> None:
             "`orderIdentifier` or `orderReference`"
         )
 
+    status = item.get("status")
+    if status not in ALLOWED_ORDER_STATUSES:
+        raise ValueError(
+            "Royal Mail Click & Drop `status` must be one of "
+            "`new`, `despatched`, or `despatchedByOtherCourier`"
+        )
+
     if (
-        item.get("status") == "despatchedByOtherCourier"
+        status == "despatchedByOtherCourier"
         and item.get("trackingNumber") is not None
     ):
         missing = [
@@ -47,6 +71,7 @@ def _validate_item(item: dict) -> None:
                 "Royal Mail Click & Drop `despatchedByOtherCourier` updates with "
                 f"`trackingNumber` also require: {', '.join(missing)}"
             )
+
 
 def order_status_request(payload, settings: provider_utils.Settings) -> lib.Serializable:
     items = provider_utils.get_value(payload, "items", []) or []
@@ -73,6 +98,7 @@ def order_status_request(payload, settings: provider_utils.Settings) -> lib.Seri
     request_data = provider_utils.clean_payload(lib.to_dict(request)) or {}
 
     return lib.Serializable(request_data, lambda data: data)
+
 
 def parse_order_status_response(
     _response: lib.Deserializable[dict],

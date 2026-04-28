@@ -415,16 +415,29 @@ class ShippingOption(lib.Enum):
 
 
 OPTION_ALIASES = {
-    # legacy / RM-style input keys
+    # carrier/API-style input keys
+    "orderReference": "order_reference",
     "orderDate": "order_date",
     "plannedDespatchDate": "planned_despatch_date",
+    "specialInstructions": "special_instructions",
+    "serviceCode": "service_code",
+    "packageFormatIdentifier": "package_format_identifier",
     "shipmentDate": "planned_despatch_date",
     "shippingDate": "planned_despatch_date",
     "shipment_date": "planned_despatch_date",
     "shipping_date": "planned_despatch_date",
     "shippingCharge": "shipping_cost_charged",
+    "shippingCostCharged": "shipping_cost_charged",
+    "otherCosts": "other_costs",
     "customsDutyCosts": "customs_duty_costs",
+    "orderTax": "order_tax",
     "orderTotal": "total",
+    "currencyCode": "currency",
+    "addressBookReference": "address_book_reference",
+    "sendNotificationsTo": "send_notifications_to",
+    "carrierName": "carrier_name",
+    "serviceRegisterCode": "service_register_code",
+    "consequentialLoss": "consequential_loss",
     "receiveEmailNotification": "receive_email_notification",
     "receiveSmsNotification": "receive_sms_notification",
     "requestSignatureUponDelivery": "request_signature_upon_delivery",
@@ -433,6 +446,8 @@ OPTION_ALIASES = {
     "AIRNumber": "air_number",
     "IOSSNumber": "ioss_number",
     "requiresExportLicense": "requires_export_license",
+    "commercialInvoiceNumber": "commercial_invoice_number",
+    "commercialInvoiceDate": "commercial_invoice_date",
     "recipientEoriNumber": "recipient_eori_number",
     "includeCN": "include_cn",
     "includeReturnsLabel": "include_returns_label",
@@ -443,7 +458,6 @@ OPTION_ALIASES = {
 
     # standard Karrio shipment option aliases
     "email_notification": "receive_email_notification",
-    "email_notification_to": "send_notifications_to",
     "sms_notification": "receive_sms_notification",
     "shipping_charges": "shipping_cost_charged",
     "invoice_number": "commercial_invoice_number",
@@ -477,7 +491,6 @@ OPTION_ALIASES = {
     "rm_importer_eori_number": "importer_eori_number",
     "rm_importer_tax_code": "importer_tax_code",
 }
-
 def shipping_options_initializer(
     options: dict,
     package_options: units.ShippingOptions = None,
@@ -501,6 +514,55 @@ def shipping_options_initializer(
         items_filter=items_filter,
     )
 
+def _service_weight_limit(
+    value: typing.Any,
+    unit: typing.Optional[str],
+) -> typing.Optional[float]:
+    """
+    Preserve service-catalog weight limits exactly as declared in services.csv.
+
+    Royal Mail Click & Drop service metadata is maintained in grams in this
+    connector, so no implicit KG conversion should occur here.
+    """
+    _ = unit
+    amount = _decimal(value)
+    if amount is None:
+        return None
+
+    return float(amount)
+
+def _parse_service_features(
+    value: typing.Optional[str],
+) -> typing.Optional[models.ServiceLevelFeatures]:
+    """
+    Convert services.csv feature tokens into Karrio ServiceLevelFeatures.
+
+    Supported current CSV tokens:
+    - b2c
+    - b2b
+    - tracked
+    - return
+    - express
+    """
+    tokens = {
+        token.strip().lower()
+        for token in str(value or "").split(":")
+        if token.strip()
+    }
+
+    if not any(tokens):
+        return None
+
+    is_return = "return" in tokens or "returns" in tokens
+
+    return models.ServiceLevelFeatures(
+        b2c=True if "b2c" in tokens else None,
+        b2b=True if "b2b" in tokens else None,
+        tracked=True if "tracked" in tokens else None,
+        express=True if "express" in tokens else None,
+        signature=True if ("signed" in tokens or "signature" in tokens) else None,
+        shipment_type="returns" if is_return else "outbound",
+    )
 
 def load_services_from_csv() -> list:
     csv_path = pathlib.Path(__file__).resolve().parent / "services.csv"
@@ -526,6 +588,10 @@ def load_services_from_csv() -> list:
                 else None
             )
 
+            weight_unit = (row.get("weight_unit") or "G").strip()
+
+            dimension_unit = (row.get("dimension_unit") or "CM").strip()
+
             zone = models.ServiceZone(
                 label=zone_label or None,
                 rate=0.0,
@@ -541,15 +607,22 @@ def load_services_from_csv() -> list:
                         (row.get("carrier_service_code") or "").strip() or None
                     ),
                     "currency": (row.get("currency") or "GBP").strip(),
-                    "weight_unit": (row.get("weight_unit") or "KG").strip(),
-                    "dimension_unit": (row.get("dimension_unit") or "CM").strip(),
-                    "min_weight": float(row["min_weight"]) if row.get("min_weight") else None,
-                    "max_weight": float(row["max_weight"]) if row.get("max_weight") else None,
+                    "weight_unit": weight_unit,
+                    "dimension_unit": dimension_unit,
+                    "min_weight": _service_weight_limit(
+                        row.get("min_weight"),
+                        weight_unit,
+                    ),
+                    "max_weight": _service_weight_limit(
+                        row.get("max_weight"),
+                        weight_unit,
+                    ),
                     "max_length": float(row["max_length"]) if row.get("max_length") else None,
                     "max_width": float(row["max_width"]) if row.get("max_width") else None,
                     "max_height": float(row["max_height"]) if row.get("max_height") else None,
                     "domicile": str(row.get("domicile", "")).lower() == "true",
                     "international": str(row.get("international", "")).lower() == "true",
+                    "features": _parse_service_features(row.get("features")),
                     "zones": [zone],
                 }
             else:
@@ -819,10 +892,12 @@ def resolve_customs_category(customs) -> typing.Optional[str]:
 
     customs_options = getattr(customs, "options", None)
     raw_value = (
-        provider_utils.get_value(customs, "content_type")
-        or provider_utils.get_value(customs, "contentType")
-        or provider_utils.get_value(customs_options, "customs_declaration_category")
-        or provider_utils.get_value(customs_options, "customsDeclarationCategory")
+        _source_value(customs, "content_type", "contentType")
+        or _source_value(
+            customs_options,
+            "customs_declaration_category",
+            "customsDeclarationCategory",
+        )
     )
 
     return normalize_customs_category(raw_value)

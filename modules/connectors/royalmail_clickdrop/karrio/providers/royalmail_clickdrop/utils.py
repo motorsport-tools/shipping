@@ -18,7 +18,7 @@ class Settings(core.Settings):
 
     @property
     def carrier_name(self):
-        return "royalmail_clickdrop"
+        return "royalmail"
 
     @property
     def connection_config(self) -> lib.units.Options:
@@ -155,6 +155,31 @@ def _format_order_identifier(
 
     return quote(f'"{text}"', safe="")
 
+def _is_pre_serialized_order_identifiers(value: typing.Any) -> bool:
+    if not isinstance(value, str):
+        return False
+
+    text = value.strip()
+    if text == "":
+        return False
+
+    if ";" not in text and "%22" not in text:
+        return False
+
+    identifiers = [segment.strip() for segment in text.split(";") if segment.strip()]
+    if not identifiers:
+        return False
+
+    if len(identifiers) > 100:
+        raise ValueError(
+            "Royal Mail Click & Drop supports a maximum of 100 order identifiers"
+        )
+
+    return all(
+        identifier.isdigit()
+        or (identifier.startswith("%22") and identifier.endswith("%22"))
+        for identifier in identifiers
+    )
 
 def get_value(obj, name: str, default=None):
     """Return a field from either a dict payload or an object instance."""
@@ -188,6 +213,9 @@ def make_order_identifiers(
     value: typing.Any,
     treat_numeric_as_reference: bool = False,
 ) -> str:
+    if _is_pre_serialized_order_identifiers(value):
+        return str(value).strip()
+
     if isinstance(value, (list, tuple, set)):
         identifiers = [
             _format_order_identifier(

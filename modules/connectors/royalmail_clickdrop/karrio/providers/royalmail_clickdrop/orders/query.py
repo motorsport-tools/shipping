@@ -14,6 +14,31 @@ import karrio.schemas.royalmail_clickdrop.return_services_response as return_ser
 import karrio.schemas.royalmail_clickdrop.version_response as version_res
 
 
+def _parse_error_message(
+    settings: provider_utils.Settings,
+    code: str,
+    message: str,
+    operation: str,
+) -> models.Message:
+    return models.Message(
+        carrier_id=settings.carrier_id,
+        carrier_name=settings.carrier_name,
+        code=code,
+        message=message,
+        details={"operation": operation},
+    )
+def _first_not_none(*values):
+    for value in values:
+        if value is not None:
+            return value
+
+    return None
+
+
+def _get_first_value(payload: typing.Any, *names: str):
+    return _first_not_none(*(provider_utils.get_value(payload, name) for name in names))
+
+
 def empty_request(
     payload: typing.Any,
     settings: provider_utils.Settings,
@@ -25,15 +50,23 @@ def order_lookup_request(
     payload: typing.Any,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
-    reference = None if isinstance(payload, (str, int, list, tuple, set)) else provider_utils.get_value(payload, "reference")
+    reference = (
+        None
+        if isinstance(payload, (str, int, list, tuple, set))
+        else provider_utils.get_value(payload, "reference")
+    )
+
     order_identifiers = (
         payload
         if isinstance(payload, (str, int, list, tuple, set))
-        else provider_utils.get_value(payload, "order_identifiers")
-        or provider_utils.get_value(payload, "orderIdentifiers")
-        or provider_utils.get_value(payload, "shipment_identifier")
-        or provider_utils.get_value(payload, "shipmentIdentifier")
-        or reference
+        else _get_first_value(
+            payload,
+            "order_identifiers",
+            "orderIdentifiers",
+            "shipment_identifier",
+            "shipmentIdentifier",
+            "reference",
+        )
     )
 
     resolved_order_identifiers = provider_utils.make_order_identifiers(
@@ -55,30 +88,36 @@ def order_lookup_request(
         lambda data: data,
     )
 
+
 def orders_lookup_request(
     payload: typing.Any,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
-    page_size = provider_utils.get_value(payload, "page_size") or provider_utils.get_value(payload, "pageSize")
-    start_date_time = (
-        provider_utils.get_value(payload, "start_date_time")
-        or provider_utils.get_value(payload, "startDateTime")
-        or provider_utils.get_value(payload, "start_datetime")
+    page_size = _get_first_value(payload, "page_size", "pageSize")
+    start_date_time = _get_first_value(
+        payload,
+        "start_date_time",
+        "startDateTime",
+        "start_datetime",
     )
-    end_date_time = (
-        provider_utils.get_value(payload, "end_date_time")
-        or provider_utils.get_value(payload, "endDateTime")
-        or provider_utils.get_value(payload, "end_datetime")
+    end_date_time = _get_first_value(
+        payload,
+        "end_date_time",
+        "endDateTime",
+        "end_datetime",
     )
-    continuation_token = (
-        provider_utils.get_value(payload, "continuation_token")
-        or provider_utils.get_value(payload, "continuationToken")
+    continuation_token = _get_first_value(
+        payload,
+        "continuation_token",
+        "continuationToken",
     )
 
     if page_size is not None:
         page_size = int(page_size)
         if page_size < 1 or page_size > 100:
-            raise ValueError("Royal Mail Click & Drop page_size must be between 1 and 100")
+            raise ValueError(
+                "Royal Mail Click & Drop page_size must be between 1 and 100"
+            )
 
     request = {
         "pageSize": page_size,
@@ -109,13 +148,30 @@ def parse_get_order_response(
         return None, messages
 
     if not isinstance(response, list):
-        return [], []
+        return None, [
+            _parse_error_message(
+                settings,
+                code="order_parse_error",
+                message="Unable to parse Royal Mail Click & Drop order lookup response",
+                operation="get_order",
+            )
+        ]
 
     orders = [
         lib.to_object(order_info_res.OrderInfoResponseElementType, item)
         for item in response
         if isinstance(item, dict)
     ]
+
+    if any(response) and not any(isinstance(item, dict) for item in response):
+        return None, [
+            _parse_error_message(
+                settings,
+                code="order_parse_error",
+                message="Unable to parse Royal Mail Click & Drop order lookup response",
+                operation="get_order",
+            )
+        ]
 
     return orders, []
 
@@ -138,8 +194,17 @@ def parse_list_orders_response(
     if any(messages):
         return None, messages
 
-    if not isinstance(response, dict):
-        return None, []
+    if not isinstance(response, dict) or not any(
+        key in response for key in ["orders", "continuationToken"]
+    ):
+        return None, [
+            _parse_error_message(
+                settings,
+                code="order_parse_error",
+                message="Unable to parse Royal Mail Click & Drop list orders response",
+                operation="list_orders",
+            )
+        ]
 
     data = lib.to_object(orders_res.OrdersResponseType, response)
 
@@ -165,13 +230,30 @@ def parse_get_order_details_response(
         return None, messages
 
     if not isinstance(response, list):
-        return [], []
+        return None, [
+            _parse_error_message(
+                settings,
+                code="order_parse_error",
+                message="Unable to parse Royal Mail Click & Drop order details response",
+                operation="get_order_details",
+            )
+        ]
 
     orders = [
         lib.to_object(order_details_res.OrderDetailsResponseElementType, item)
         for item in response
         if isinstance(item, dict)
     ]
+
+    if any(response) and not any(isinstance(item, dict) for item in response):
+        return None, [
+            _parse_error_message(
+                settings,
+                code="order_parse_error",
+                message="Unable to parse Royal Mail Click & Drop order details response",
+                operation="get_order_details",
+            )
+        ]
 
     return orders, []
 
@@ -194,8 +276,17 @@ def parse_list_order_details_response(
     if any(messages):
         return None, messages
 
-    if not isinstance(response, dict):
-        return None, []
+    if not isinstance(response, dict) or not any(
+        key in response for key in ["orders", "continuationToken"]
+    ):
+        return None, [
+            _parse_error_message(
+                settings,
+                code="order_parse_error",
+                message="Unable to parse Royal Mail Click & Drop list order details response",
+                operation="list_order_details",
+            )
+        ]
 
     data = lib.to_object(orders_details_res.OrdersDetailsResponseType, response)
 
@@ -220,8 +311,15 @@ def parse_get_return_services_response(
     if any(messages):
         return None, messages
 
-    if not isinstance(response, dict):
-        return None, []
+    if not isinstance(response, dict) or "services" not in response:
+        return None, [
+            _parse_error_message(
+                settings,
+                code="return_services_parse_error",
+                message="Unable to parse Royal Mail Click & Drop return services response",
+                operation="get_return_services",
+            )
+        ]
 
     data = lib.to_object(return_services_res.ReturnServicesResponseType, response)
 
@@ -246,8 +344,17 @@ def parse_get_version_response(
     if any(messages):
         return None, messages
 
-    if not isinstance(response, dict):
-        return None, []
+    if not isinstance(response, dict) or not any(
+        key in response for key in ["commit", "build", "release", "releaseDate"]
+    ):
+        return None, [
+            _parse_error_message(
+                settings,
+                code="version_parse_error",
+                message="Unable to parse Royal Mail Click & Drop version response",
+                operation="get_version",
+            )
+        ]
 
     data = lib.to_object(version_res.VersionResponseType, response)
 

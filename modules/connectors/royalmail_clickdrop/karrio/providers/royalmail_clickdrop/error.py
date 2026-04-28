@@ -364,6 +364,35 @@ def parse_tracking_error_response(
             )
         )
 
+    if response.get("errors") and not any(
+        key in response for key in ["httpCode", "httpMessage"]
+    ):
+        for item in response.get("errors") or []:
+            if not isinstance(item, dict):
+                continue
+
+            messages.append(
+                _message(
+                    settings,
+                    code=(
+                        str(item.get("errorCode"))
+                        if item.get("errorCode") is not None
+                        else item.get("code") or "tracking_error"
+                    ),
+                    message=(
+                        item.get("errorDescription")
+                        or item.get("errorMessage")
+                        or item.get("message")
+                        or "Tracking error"
+                    ),
+                    details={
+                        **kwargs,
+                        "cause": item.get("errorCause"),
+                        "resolution": item.get("errorResolution"),
+                    },
+                )
+            )
+
     for item in response.get("mailPieces", []) or []:
         if not isinstance(item, dict) or not isinstance(item.get("error"), dict):
             continue
