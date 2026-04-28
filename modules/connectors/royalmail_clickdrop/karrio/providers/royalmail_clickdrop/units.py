@@ -633,6 +633,7 @@ def load_services_from_csv() -> list:
 
 DEFAULT_SERVICES = load_services_from_csv()
 
+REFERENCE_SERVICE_LEVELS = lib.to_dict(DEFAULT_SERVICES, clear_empty=False)
 
 def _services_index() -> dict[str, models.ServiceLevel]:
     return {str(svc.service_code).lower(): svc for svc in DEFAULT_SERVICES if svc.service_code}
