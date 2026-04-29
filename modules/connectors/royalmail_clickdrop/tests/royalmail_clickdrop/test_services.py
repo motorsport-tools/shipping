@@ -51,7 +51,7 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             self.assertIn(code, codes)
 
     def test_plugin_metadata_service_levels_are_json_serializable(self):
-        """Keep plugin metadata service levels JSON-safe for /v1/references."""
+        """Keep plugin metadata service levels directly JSON-safe for /v1/references."""
         metadata = plugin.METADATA
         service_levels = metadata.service_levels or []
 
@@ -63,9 +63,21 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             if self._service_code(service) == "tracked_24"
         )
 
-        self.assertTrue(tracked_24.features.tracked)
-        self.assertTrue(tracked_24.features.b2c)
-        self.assertEqual(tracked_24.features.shipment_type, "outbound")
+        features = getattr(tracked_24, "features", None) or tracked_24.get("features") or {}
+        tracked = getattr(features, "tracked", None)
+        b2c = getattr(features, "b2c", None)
+        shipment_type = getattr(features, "shipment_type", None)
+
+        if tracked is None and isinstance(features, dict):
+            tracked = features.get("tracked")
+        if b2c is None and isinstance(features, dict):
+            b2c = features.get("b2c")
+        if shipment_type is None and isinstance(features, dict):
+            shipment_type = features.get("shipment_type")
+
+        self.assertTrue(tracked)
+        self.assertTrue(b2c)
+        self.assertEqual(shipment_type, "outbound")
 
     def test_service_weight_limits_are_normalized(self):
         """Keep Royal Mail service metadata in grams exactly as declared in services.csv."""

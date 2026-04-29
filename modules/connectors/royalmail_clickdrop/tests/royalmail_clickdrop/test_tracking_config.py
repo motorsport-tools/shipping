@@ -42,6 +42,25 @@ class TestRoyalMailClickandDropTrackingConfig(unittest.TestCase):
             },
         )
 
+    def test_get_tracking_without_tracking_credentials_returns_disabled_message(self):
+        gateway = self._gateway()
+
+        with patch("karrio.mappers.royalmail_clickdrop.proxy.lib.request") as mock:
+            parsed = (
+                karrio.Tracking.fetch(
+                    self._tracking(fixture.TrackingPayload)
+                ).from_(gateway).parse()
+            )
+
+            self.assertEqual(mock.call_count, 0)
+
+        tracking_details, messages = parsed
+
+        self.assertEqual(lib.to_dict(tracking_details), [])
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].code, "TRACKING_DISABLED")
+        self.assertIn("not enabled", messages[0].message)
+
     def test_tracking_headers_require_credentials(self):
         """Reject tracking usage when the separate Royal Mail tracking credentials are missing."""
         gateway = self._gateway()
