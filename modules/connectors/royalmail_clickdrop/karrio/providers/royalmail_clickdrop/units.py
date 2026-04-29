@@ -33,11 +33,10 @@ class ConnectionConfig(lib.Enum):
     tracking_api_base_url = lib.OptionEnum(
         "tracking_api_base_url",
         str,
-        default="https://api.royalmail.net",
     )
 
-    carrier_name = lib.OptionEnum("carrier_name", str)
-    label_type = lib.OptionEnum("label_type", LabelType)
+    carrier_name = lib.OptionEnum("carrier_name", str, default="Royal Mail OBA")
+    label_type = lib.OptionEnum("label_type", LabelType, default="PDF")
     shipping_options = lib.OptionEnum("shipping_options", list)
     shipping_services = lib.OptionEnum("shipping_services", list)
 

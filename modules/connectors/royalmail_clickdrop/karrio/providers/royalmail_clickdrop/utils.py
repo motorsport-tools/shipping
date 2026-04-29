@@ -3,9 +3,14 @@ import datetime
 import typing
 from urllib.parse import quote
 
+import karrio.core as core
 import karrio.core.units as units
 import karrio.lib as lib
-import karrio.core as core
+
+
+DEFAULT_CLICK_AND_DROP_API_BASE_URL = "https://api.parcel.royalmail.com/api/v1"
+DEFAULT_TRACKING_API_BASE_URL = "https://api.royalmail.net"
+DEFAULT_LABEL_TYPE = "PDF"
 
 
 class Settings(core.Settings):
@@ -21,8 +26,17 @@ class Settings(core.Settings):
         return "royalmail"
 
     @property
+    def has_tracking_credentials(self) -> bool:
+        return all(
+            str(value or "").strip()
+            for value in [
+                self.tracking_client_id,
+                self.tracking_client_secret,
+            ]
+        )
+
+    @property
     def api_key(self) -> str:
-        """Backward-compatible alias used by existing proxy code."""
         return self.click_and_drop_api_key
 
     @property
@@ -31,7 +45,6 @@ class Settings(core.Settings):
 
         raw_config = dict(self.config or {})
 
-        # Backward compatibility for older saved config payloads
         if (
             raw_config.get("base_url")
             and not raw_config.get("click_and_drop_api_base_url")
@@ -51,7 +64,10 @@ class Settings(core.Settings):
 
     @property
     def server_url(self):
-        return self.connection_config.click_and_drop_api_base_url.state.rstrip("/")
+        return (
+            self.connection_config.click_and_drop_api_base_url.state
+            or DEFAULT_CLICK_AND_DROP_API_BASE_URL
+        ).rstrip("/")
 
     @property
     def shipping_carrier_name(self) -> typing.Optional[str]:
@@ -78,7 +94,7 @@ class Settings(core.Settings):
 
     @property
     def label_type(self) -> str:
-        return self.connection_config.label_type.state or "PDF"
+        return self.connection_config.label_type.state or DEFAULT_LABEL_TYPE
 
     @property
     def default_currency(self) -> typing.Optional[str]:
@@ -89,13 +105,17 @@ class Settings(core.Settings):
 
     @property
     def tracking_server_url(self):
-        return self.connection_config.tracking_api_base_url.state.rstrip("/")
+        return (
+            self.connection_config.tracking_api_base_url.state
+            or DEFAULT_TRACKING_API_BASE_URL
+        ).rstrip("/")
 
     @property
     def tracking_headers(self) -> dict:
-        if not all([self.tracking_client_id, self.tracking_client_secret]):
+        if not self.has_tracking_credentials:
             raise ValueError(
-                "Royal Mail Tracking API requires `tracking_client_id` and `tracking_client_secret`."
+                "Royal Mail Tracking API requires `tracking_client_id` "
+                "and `tracking_client_secret`."
             )
 
         return {
@@ -104,6 +124,7 @@ class Settings(core.Settings):
             "X-IBM-Client-Secret": self.tracking_client_secret,
             "X-Accept-RMG-Terms": "yes",
         }
+
 
 def clean_payload(value):
     """
@@ -117,10 +138,7 @@ def clean_payload(value):
     - preserves False, 0, and empty strings
     """
     if isinstance(value, dict):
-        cleaned = {
-            key: clean_payload(item)
-            for key, item in value.items()
-        }
+        cleaned = {key: clean_payload(item) for key, item in value.items()}
 
         return {
             key: item
@@ -168,6 +186,7 @@ def _format_order_identifier(
 
     return quote(f'"{text}"', safe="")
 
+
 def _is_pre_serialized_order_identifiers(value: typing.Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -193,6 +212,7 @@ def _is_pre_serialized_order_identifiers(value: typing.Any) -> bool:
         or (identifier.startswith("%22") and identifier.endswith("%22"))
         for identifier in identifiers
     )
+
 
 def get_value(obj, name: str, default=None):
     """Return a field from either a dict payload or an object instance."""

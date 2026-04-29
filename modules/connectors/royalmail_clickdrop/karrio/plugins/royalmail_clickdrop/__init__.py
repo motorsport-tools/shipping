@@ -5,6 +5,22 @@ from karrio.mappers.royalmail_clickdrop.proxy import Proxy
 from karrio.mappers.royalmail_clickdrop.settings import Settings
 import karrio.providers.royalmail_clickdrop.units as units
 
+def _register_server_hooks():
+    try:
+        from django.conf import settings as django_settings
+
+        if not getattr(django_settings, "configured", False):
+            return
+
+        from karrio.plugins.royalmail_clickdrop.server import register
+
+        register()
+    except Exception:
+        return
+
+
+_register_server_hooks()
+
 
 METADATA = PluginMetadata(
     status="development",

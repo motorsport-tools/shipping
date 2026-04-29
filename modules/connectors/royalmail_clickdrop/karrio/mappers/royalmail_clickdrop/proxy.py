@@ -28,6 +28,7 @@ def _normalize_query(query: typing.Optional[dict]) -> str:
 
     return urlencode(normalized, safe=",")
 
+
 def _signature_url(
     settings: provider_settings.Settings,
     tracking_number: str,
@@ -50,7 +51,10 @@ def _signature_url(
         return f"{settings.tracking_server_url}{signature_link}"
 
     signature = mail_piece.get("signature") or {}
-    if any(signature.get(key) for key in ["imageId", "recipientName", "signatureDateTime"]):
+    if any(
+        signature.get(key)
+        for key in ["imageId", "recipientName", "signatureDateTime"]
+    ):
         mail_piece_id = _tracking_mailpiece_identifier(
             tracking_number,
             mail_piece=mail_piece,
@@ -59,7 +63,11 @@ def _signature_url(
 
     return None
 
-def _chunks(values: typing.List[str], size: int = 30) -> typing.Iterable[typing.List[str]]:
+
+def _chunks(
+    values: typing.List[str],
+    size: int = 30,
+) -> typing.Iterable[typing.List[str]]:
     for index in range(0, len(values), size):
         yield values[index : index + size]
 
@@ -86,6 +94,33 @@ def _summary_piece_keys(mail_piece: dict) -> typing.List[str]:
         )
         if key
     ]
+
+
+def _tracking_disabled_payload() -> dict:
+    return {
+        "errors": [
+            {
+                "errorCode": "TRACKING_DISABLED",
+                "errorDescription": (
+                    "Royal Mail Tracking API is not enabled for this connection. "
+                    "Provide `tracking_client_id` and `tracking_client_secret` "
+                    "to use tracking."
+                ),
+                "errorResolution": (
+                    "Update the Royal Mail connection with valid Tracking API credentials."
+                ),
+            }
+        ]
+    }
+
+
+def _tracking_disabled_response() -> dict:
+    return {
+        "summary": _tracking_disabled_payload(),
+        "events": None,
+        "signature": None,
+    }
+
 
 def _tracking_mailpiece_identifier(
     tracking_number: str,
@@ -130,9 +165,10 @@ def _events_url(
 
 def _summary_piece_has_error(summary_piece: typing.Optional[dict]) -> bool:
     return bool((summary_piece or {}).get("error"))
+
+
 class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
     settings: provider_settings.Settings
-
 
     def get_rates(self, request: lib.Serializable) -> lib.Deserializable[dict]:
         return super().get_rates(request)
@@ -148,7 +184,8 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
         return lib.Deserializable(response, lib.to_dict)
 
     def create_return_shipment(
-        self, request: lib.Serializable
+        self,
+        request: lib.Serializable,
     ) -> lib.Deserializable[dict]:
         response = lib.request(
             url=f"{self.settings.server_url}/returns",
@@ -192,7 +229,10 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
     def retry_manifest(self, request: lib.Serializable) -> lib.Deserializable[dict]:
         payload = request.serialize()
         response = lib.request(
-            url=f"{self.settings.server_url}/manifests/retry/{payload['manifestIdentifier']}",
+            url=(
+                f"{self.settings.server_url}/manifests/retry/"
+                f"{payload['manifestIdentifier']}"
+            ),
             trace=self.trace_as("json"),
             method="POST",
             headers=self.settings.headers,
@@ -251,7 +291,10 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
         )
         return lib.Deserializable(response, lib.to_dict)
 
-    def get_order_details(self, request: lib.Serializable) -> lib.Deserializable[typing.Any]:
+    def get_order_details(
+        self,
+        request: lib.Serializable,
+    ) -> lib.Deserializable[typing.Any]:
         payload = request.serialize()
         response = lib.request(
             url=f"{self.settings.server_url}/orders/{payload['orderIdentifiers']}/full",
@@ -277,7 +320,10 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
         )
         return lib.Deserializable(response, lib.to_dict)
 
-    def get_return_services(self, request: lib.Serializable = None) -> lib.Deserializable[dict]:
+    def get_return_services(
+        self,
+        request: lib.Serializable = None,
+    ) -> lib.Deserializable[dict]:
         response = lib.request(
             url=f"{self.settings.server_url}/returns/services",
             trace=self.trace_as("json"),
@@ -296,7 +342,8 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
         return lib.Deserializable(response, lib.to_dict)
 
     def authenticate(
-        self, request: lib.Serializable = None
+        self,
+        request: lib.Serializable = None,
     ) -> lib.Deserializable[dict]:
         return lib.Deserializable(
             {
@@ -306,9 +353,20 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
         )
 
     def get_tracking(
-        self, request: lib.Serializable
+        self,
+        request: lib.Serializable,
     ) -> lib.Deserializable[typing.List[typing.Tuple[str, dict]]]:
         tracking_numbers = request.serialize()
+
+        if not self.settings.has_tracking_credentials:
+            return lib.Deserializable(
+                [
+                    (tracking_number, _tracking_disabled_response())
+                    for tracking_number in tracking_numbers
+                ],
+                lambda pairs: list(pairs),
+            )
+
         _trace = self.trace_as("json")
         results: typing.Dict[str, dict] = {}
 
@@ -374,7 +432,8 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
             summary_piece = next(iter(summary_payload.get("mailPieces") or []), None)
 
             if isinstance(summary_payload, dict) and any(
-                key in summary_payload for key in ["httpCode", "httpMessage", "errors"]
+                key in summary_payload
+                for key in ["httpCode", "httpMessage", "errors"]
             ):
                 continue
 
@@ -404,7 +463,9 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
                     headers=self.settings.tracking_headers,
                 )
 
-                if signature_response is not None and any(str(signature_response).strip()):
+                if signature_response is not None and any(
+                    str(signature_response).strip()
+                ):
                     signature_payload = lib.to_dict(signature_response)
 
                     if (

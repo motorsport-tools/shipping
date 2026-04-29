@@ -51,23 +51,66 @@ def _option_state(source, name):
     option = getattr(source, name, None) if source is not None else None
     return getattr(option, "state", None)
 
+
+def _service_selector(service) -> typing.Optional[str]:
+    if service in [None, ""]:
+        return None
+
+    if isinstance(service, dict):
+        for key in [
+            "service_code",
+            "carrier_service_code",
+            "code",
+            "name",
+            "id",
+        ]:
+            value = service.get(key)
+            if value not in [None, ""]:
+                return str(value).strip()
+
+    for attr in [
+        "service_code",
+        "carrier_service_code",
+        "code",
+        "id",
+        "value_or_key",
+        "name_or_key",
+        "value",
+        "name",
+    ]:
+        value = getattr(service, attr, None)
+        if value not in [None, ""]:
+            return str(value).strip()
+
+    selector = str(service).strip()
+    return selector or None
+
+
 def _resolve_selected_service(payload, options):
+    explicit_selector = _service_selector(options.service_code.state)
+    if explicit_selector is not None:
+        return provider_units.resolve_service_code(explicit_selector) or explicit_selector
+
     requested_services = (
         getattr(payload, "services", None)
-        or ([payload.service] if getattr(payload, "service", None) else None)
+        or ([payload.service] if getattr(payload, "service", None) else [])
     )
-    services = lib.to_services(
-        requested_services,
-        provider_units.ShippingService,
-    )
-    service = getattr(services, "first", None)
 
-    return (
-        options.service_code.state
-        or _attr(service, "value_or_key")
-        or _attr(service, "name_or_key")
-        or payload.service
+    selector = next(
+        (
+            resolved
+            for resolved in (
+                _service_selector(service) for service in requested_services
+            )
+            if resolved not in [None, ""]
+        ),
+        None,
     )
+
+    if selector is None:
+        return None
+
+    return provider_units.resolve_service_code(selector) or selector
 
 def _is_northern_ireland(address) -> bool:
     postcode = (

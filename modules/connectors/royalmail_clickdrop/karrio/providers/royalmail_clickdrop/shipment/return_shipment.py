@@ -16,6 +16,44 @@ except ImportError:  # pragma: no cover
     pycountry = None
 
 
+COUNTRY_ALPHA3_FALLBACK = {
+    "US": "USA",
+    "ES": "ESP",
+    "GB": "GBR",
+    "UK": "GBR",
+    "FR": "FRA",
+    "DE": "DEU",
+    "IT": "ITA",
+    "NL": "NLD",
+    "BE": "BEL",
+    "IE": "IRL",
+    "AU": "AUS",
+    "CA": "CAN",
+    "NZ": "NZL",
+    "CH": "CHE",
+    "AT": "AUT",
+    "DK": "DNK",
+    "SE": "SWE",
+    "NO": "NOR",
+    "PT": "PRT",
+    "PL": "POL",
+    "CZ": "CZE",
+    "HU": "HUN",
+    "RO": "ROU",
+    "BG": "BGR",
+    "GR": "GRC",
+    "JP": "JPN",
+    "CN": "CHN",
+    "HK": "HKG",
+    "SG": "SGP",
+    "MY": "MYS",
+    "AE": "ARE",
+    "SA": "SAU",
+    "ZA": "ZAF",
+    "IN": "IND",
+}
+
+
 def _split_name(name: str) -> typing.Tuple[str, str]:
     if not name:
         return "", ""
@@ -40,39 +78,18 @@ def _resolve_country_name(address) -> str:
     return ""
 
 
-ISO3_FALLBACKS = {
-    "GB": "GBR",
-    "US": "USA",
-    "ES": "ESP",
-    "FR": "FRA",
-    "DE": "DEU",
-    "IE": "IRL",
-    "IT": "ITA",
-    "NL": "NLD",
-    "BE": "BEL",
-    "CH": "CHE",
-    "AT": "AUT",
-    "AU": "AUS",
-    "CA": "CAN",
-    "NZ": "NZL",
-}
-
-
 def _resolve_country_iso3(country_code: str) -> str:
     if not country_code:
         return ""
 
-    code = str(country_code).strip().upper()
-
-    if len(code) == 3 and code.isalpha():
-        return code
+    code = str(country_code).upper()
 
     if pycountry is not None:
-        country = pycountry.countries.get(alpha_2=code) or pycountry.countries.get(alpha_3=code)
+        country = pycountry.countries.get(alpha_2=code)
         if country is not None:
             return country.alpha_3
 
-    return ISO3_FALLBACKS.get(code, code)
+    return COUNTRY_ALPHA3_FALLBACK.get(code, code)
 
 
 def _first_present(*values):
@@ -82,30 +99,78 @@ def _first_present(*values):
 
     return None
 
+
+def _service_selector(service) -> typing.Optional[str]:
+    if service in [None, ""]:
+        return None
+
+    if isinstance(service, dict):
+        for key in [
+            "service_code",
+            "carrier_service_code",
+            "code",
+            "name",
+            "id",
+        ]:
+            value = service.get(key)
+            if value not in [None, ""]:
+                return str(value).strip()
+
+    for attr in [
+        "service_code",
+        "carrier_service_code",
+        "code",
+        "id",
+        "value_or_key",
+        "name_or_key",
+        "value",
+        "name",
+    ]:
+        value = getattr(service, attr, None)
+        if value not in [None, ""]:
+            return str(value).strip()
+
+    selector = str(service).strip()
+    return selector or None
+
+
 def _resolve_selected_service(payload, options, default=None):
+    explicit_selector = _service_selector(options.service_code.state)
+    if explicit_selector is not None:
+        return provider_units.resolve_service_code(explicit_selector) or explicit_selector
+
     requested_services = (
         getattr(payload, "services", None)
-        or ([payload.service] if getattr(payload, "service", None) else None)
+        or ([payload.service] if getattr(payload, "service", None) else [])
     )
-    services = lib.to_services(
-        requested_services,
-        provider_units.ShippingService,
-    )
-    service = getattr(services, "first", None)
 
-    return (
-        options.service_code.state
-        or getattr(service, "value_or_key", None)
-        or getattr(service, "name_or_key", None)
-        or payload.service
-        or default
+    selector = next(
+        (
+            resolved
+            for resolved in (
+                _service_selector(service) for service in requested_services
+            )
+            if resolved not in [None, ""]
+        ),
+        None,
     )
+
+    if selector is not None:
+        return provider_units.resolve_service_code(selector) or selector
+
+    default_selector = _service_selector(default)
+    if default_selector is None:
+        return None
+
+    return provider_units.resolve_service_code(default_selector) or default_selector
+
 
 def _build_customer_reference(reference: typing.Optional[str]):
     if reference in [None, ""]:
         return None
 
     return royalmail_return_req.CustomerReferenceType(reference=reference)
+
 
 def _build_return_address(address) -> royalmail_return_req.AddressType:
     first_name, last_name = _split_name(address.person_name)
@@ -170,9 +235,7 @@ def parse_return_shipment_response(
             carrier_name=settings.carrier_name,
             tracking_number=tracking_number,
             shipment_identifier=str(
-                data.shipment.uniqueItemId
-                or data.shipment.trackingNumber
-                or ""
+                data.shipment.uniqueItemId or data.shipment.trackingNumber or ""
             ),
             label_type=settings.label_type,
             docs=(
