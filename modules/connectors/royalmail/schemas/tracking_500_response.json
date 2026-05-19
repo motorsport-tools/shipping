@@ -1,0 +1,12 @@
+{
+  "httpCode": "500",
+  "httpMessage": "Internal Server Error",
+  "errors": [
+    {
+      "errorCode": "E0009",
+      "errorDescription": "Internal server error",
+      "errorCause": "Business fulfilment system returned an error response",
+      "errorResolution": "Please try again later"
+    }
+  ]
+}

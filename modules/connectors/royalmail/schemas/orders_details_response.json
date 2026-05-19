@@ -1,0 +1,199 @@
+{
+  "orders": [
+    {
+      "orderIdentifier": 12345678,
+      "orderStatus": "despatched",
+      "createdOn": "2024-01-01T10:00:00Z",
+      "printedOn": "2024-01-01T10:05:00Z",
+      "shippedOn": "2024-01-01T11:00:00Z",
+      "postageAppliedOn": "2024-01-01T10:03:00Z",
+      "manifestedOn": "2024-01-01T12:00:00Z",
+      "orderDate": "2024-01-01T09:55:00Z",
+      "despatchedByOtherCourierOn": "2024-01-02T08:30:00Z",
+      "tradingName": "Motorsport Tools",
+      "channel": "Shopify",
+      "marketplaceTypeName": "Web Store",
+      "department": "Dispatch",
+      "AIRNumber": "AIR-123456",
+      "requiresExportLicense": false,
+      "commercialInvoiceNumber": "INV-1001",
+      "commercialInvoiceDate": "2024-01-01T09:00:00Z",
+      "orderReference": "ORDER-1001",
+      "channelShippingMethod": "Royal Mail Tracked 24",
+      "specialInstructions": "Leave with neighbour if not in",
+      "pickerSpecialInstructions": "Handle with care",
+      "subtotal": 25.0,
+      "shippingCostCharged": 3.5,
+      "orderDiscount": 1.0,
+      "total": 27.5,
+      "weightInGrams": 1000,
+      "packageSize": "smallParcel",
+      "accountBatchNumber": "BATCH-001",
+      "currencyCode": "GBP",
+      "shippingDetails": {
+        "shippingCost": 3.5,
+        "trackingNumber": "RM123456789GB",
+        "shippingTrackingStatus": "Delivered",
+        "serviceCode": "TPN24",
+        "shippingService": "Royal Mail Tracked 24",
+        "shippingCarrier": "Royal Mail OBA",
+        "receiveEmailNotification": true,
+        "receiveSmsNotification": false,
+        "guaranteedSaturdayDelivery": false,
+        "requestSignatureUponDelivery": true,
+        "isLocalCollect": false,
+        "shippingUpdateSuccessDate": "2024-01-01T11:05:00Z",
+        "packages": [
+          {
+            "packageNumber": 1,
+            "trackingNumber": "RM123456789GB"
+          }
+        ]
+      },
+      "shippingInfo": {
+        "title": "Mr",
+        "firstName": "John",
+        "lastName": "Smith",
+        "companyName": "Example Ltd",
+        "addressLine1": "1 High Street",
+        "addressLine2": "Suite 4",
+        "addressLine3": "Industrial Estate",
+        "city": "London",
+        "county": "Greater London",
+        "postcode": "SW1A1AA",
+        "countryCode": "GBR",
+        "phoneNumber": "07123456789",
+        "emailAddress": "john@example.com"
+      },
+      "billingInfo": {
+        "title": "Ms",
+        "firstName": "Jane",
+        "lastName": "Doe",
+        "companyName": "Example Billing Ltd",
+        "addressLine1": "2 Billing Street",
+        "addressLine2": "Accounts Dept",
+        "addressLine3": "Business Park",
+        "city": "London",
+        "county": "Greater London",
+        "postcode": "EC1A1AA",
+        "countryCode": "GBR",
+        "phoneNumber": "07111111111",
+        "emailAddress": "billing@example.com"
+      },
+      "orderLines": [
+        {
+          "SKU": "SKU-1",
+          "name": "Blue T-Shirt",
+          "quantity": 2,
+          "unitValue": 12.5,
+          "lineTotal": 25.0,
+          "customsCode": "610910"
+        }
+      ],
+      "tags": [
+        {
+          "key": "channel",
+          "value": "web"
+        }
+      ]
+    },
+    {
+      "orderIdentifier": 12345679,
+      "orderStatus": "new",
+      "createdOn": "2024-01-02T10:00:00Z",
+      "printedOn": null,
+      "shippedOn": null,
+      "postageAppliedOn": null,
+      "manifestedOn": null,
+      "orderDate": "2024-01-02T09:55:00Z",
+      "despatchedByOtherCourierOn": null,
+      "tradingName": "Motorsport Tools",
+      "channel": "eBay",
+      "marketplaceTypeName": "Marketplace",
+      "department": "Returns",
+      "AIRNumber": null,
+      "requiresExportLicense": false,
+      "commercialInvoiceNumber": null,
+      "commercialInvoiceDate": null,
+      "orderReference": "ORDER-1002",
+      "channelShippingMethod": "Royal Mail Tracked 48",
+      "specialInstructions": "Ring bell twice",
+      "pickerSpecialInstructions": "Pack with invoice",
+      "subtotal": 45.0,
+      "shippingCostCharged": 0.0,
+      "orderDiscount": 0.0,
+      "total": 45.0,
+      "weightInGrams": 750,
+      "packageSize": "parcel",
+      "accountBatchNumber": "BATCH-002",
+      "currencyCode": "GBP",
+      "shippingDetails": {
+        "shippingCost": 0.0,
+        "trackingNumber": null,
+        "shippingTrackingStatus": null,
+        "serviceCode": "TPN48",
+        "shippingService": "Royal Mail Tracked 48",
+        "shippingCarrier": "Royal Mail OBA",
+        "receiveEmailNotification": false,
+        "receiveSmsNotification": false,
+        "guaranteedSaturdayDelivery": false,
+        "requestSignatureUponDelivery": false,
+        "isLocalCollect": false,
+        "shippingUpdateSuccessDate": null,
+        "packages": [
+          {
+            "packageNumber": 1,
+            "trackingNumber": null
+          }
+        ]
+      },
+      "shippingInfo": {
+        "title": "Mrs",
+        "firstName": "Alice",
+        "lastName": "Brown",
+        "companyName": "Customer Co",
+        "addressLine1": "45 Market Street",
+        "addressLine2": null,
+        "addressLine3": null,
+        "city": "Manchester",
+        "county": "Greater Manchester",
+        "postcode": "M11AA",
+        "countryCode": "GBR",
+        "phoneNumber": "07000000000",
+        "emailAddress": "alice@example.com"
+      },
+      "billingInfo": {
+        "title": "Mrs",
+        "firstName": "Alice",
+        "lastName": "Brown",
+        "companyName": "Customer Co",
+        "addressLine1": "45 Market Street",
+        "addressLine2": null,
+        "addressLine3": null,
+        "city": "Manchester",
+        "county": "Greater Manchester",
+        "postcode": "M11AA",
+        "countryCode": "GBR",
+        "phoneNumber": "07000000000",
+        "emailAddress": "alice@example.com"
+      },
+      "orderLines": [
+        {
+          "SKU": "SKU-3",
+          "name": "Brake Disc",
+          "quantity": 1,
+          "unitValue": 45.0,
+          "lineTotal": 45.0,
+          "customsCode": "870830"
+        }
+      ],
+      "tags": [
+        {
+          "key": "source",
+          "value": "ebay"
+        }
+      ]
+    }
+  ],
+  "continuationToken": "next-page-token-123"
+}

@@ -1,0 +1,115 @@
+[
+  {
+    "orderIdentifier": 12345678,
+    "orderStatus": "despatched",
+    "createdOn": "2024-01-01T10:00:00Z",
+    "printedOn": "2024-01-01T10:05:00Z",
+    "shippedOn": "2024-01-01T11:00:00Z",
+    "postageAppliedOn": "2024-01-01T10:03:00Z",
+    "manifestedOn": "2024-01-01T12:00:00Z",
+    "orderDate": "2024-01-01T09:55:00Z",
+    "despatchedByOtherCourierOn": "2024-01-02T08:30:00Z",
+    "tradingName": "Motorsport Tools",
+    "channel": "Shopify",
+    "marketplaceTypeName": "Web Store",
+    "department": "Dispatch",
+    "AIRNumber": "AIR-123456",
+    "requiresExportLicense": false,
+    "commercialInvoiceNumber": "INV-1001",
+    "commercialInvoiceDate": "2024-01-01T09:00:00Z",
+    "orderReference": "ORDER-1001",
+    "channelShippingMethod": "Royal Mail Tracked 24",
+    "specialInstructions": "Leave with neighbour if not in",
+    "pickerSpecialInstructions": "Handle with care",
+    "subtotal": 25.0,
+    "shippingCostCharged": 3.5,
+    "orderDiscount": 1.0,
+    "total": 27.5,
+    "weightInGrams": 1000,
+    "packageSize": "smallParcel",
+    "accountBatchNumber": "BATCH-001",
+    "currencyCode": "GBP",
+    "shippingDetails": {
+      "shippingCost": 3.5,
+      "trackingNumber": "RM123456789GB",
+      "shippingTrackingStatus": "Delivered",
+      "serviceCode": "TPN24",
+      "shippingService": "Royal Mail Tracked 24",
+      "shippingCarrier": "Royal Mail OBA",
+      "receiveEmailNotification": true,
+      "receiveSmsNotification": false,
+      "guaranteedSaturdayDelivery": false,
+      "requestSignatureUponDelivery": true,
+      "isLocalCollect": false,
+      "shippingUpdateSuccessDate": "2024-01-01T11:05:00Z",
+      "packages": [
+        {
+          "packageNumber": 1,
+          "trackingNumber": "RM123456789GB"
+        },
+        {
+          "packageNumber": 2,
+          "trackingNumber": "RM123456790GB"
+        }
+      ]
+    },
+    "shippingInfo": {
+      "title": "Mr",
+      "firstName": "John",
+      "lastName": "Smith",
+      "companyName": "Example Ltd",
+      "addressLine1": "1 High Street",
+      "addressLine2": "Suite 4",
+      "addressLine3": "Industrial Estate",
+      "city": "London",
+      "county": "Greater London",
+      "postcode": "SW1A1AA",
+      "countryCode": "GBR",
+      "phoneNumber": "07123456789",
+      "emailAddress": "john@example.com"
+    },
+    "billingInfo": {
+      "title": "Ms",
+      "firstName": "Jane",
+      "lastName": "Doe",
+      "companyName": "Example Billing Ltd",
+      "addressLine1": "2 Billing Street",
+      "addressLine2": "Accounts Dept",
+      "addressLine3": "Business Park",
+      "city": "London",
+      "county": "Greater London",
+      "postcode": "EC1A1AA",
+      "countryCode": "GBR",
+      "phoneNumber": "07111111111",
+      "emailAddress": "billing@example.com"
+    },
+    "orderLines": [
+      {
+        "SKU": "SKU-1",
+        "name": "Blue T-Shirt",
+        "quantity": 2,
+        "unitValue": 12.5,
+        "lineTotal": 25.0,
+        "customsCode": "610910"
+      },
+      {
+        "SKU": "SKU-2",
+        "name": "Sticker Pack",
+        "quantity": 1,
+        "unitValue": 2.5,
+        "lineTotal": 2.5,
+        "customsCode": "491199"
+      }
+    ],
+    "tags": [
+      {
+        "key": "channel",
+        "value": "web"
+      },
+      {
+        "key": "warehouse",
+        "value": "london"
+      }
+    ]
+  }
+]

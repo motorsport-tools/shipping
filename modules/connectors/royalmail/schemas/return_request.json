@@ -1,0 +1,38 @@
+{
+  "service": {
+    "serviceCode": "TSN"
+  },
+  "shipment": {
+    "shippingAddress": {
+      "title": "",
+      "firstName": "John",
+      "lastName": "Smith",
+      "companyName": "Example Ltd",
+      "addressLine1": "1 High Street",
+      "addressLine2": "",
+      "addressLine3": "",
+      "city": "London",
+      "county": "",
+      "postcode": "SW1A1AA",
+      "country": "United Kingdom",
+      "countryIsoCode": "GBR"
+    },
+    "returnAddress": {
+      "title": "",
+      "firstName": "Warehouse",
+      "lastName": "Team",
+      "companyName": "Example Warehouse",
+      "addressLine1": "123 Test Street",
+      "addressLine2": "",
+      "addressLine3": "",
+      "city": "London",
+      "county": "",
+      "postcode": "SW1A1AA",
+      "country": "United Kingdom",
+      "countryIsoCode": "GBR"
+    },
+    "customerReference": {
+      "reference": "ORDER-1001"
+    }
+  }
+}

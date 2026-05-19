@@ -1,0 +1,5 @@
+{
+  "httpCode": "405",
+  "httpMessage": "Method Not Allowed",
+  "moreInformation": "The method is not allowed for the requested URL"
+}

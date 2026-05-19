@@ -1,0 +1,18 @@
+[
+  {
+    "orderIdentifier": 12345678,
+    "orderReference": "ORDER-1001",
+    "createdOn": "2024-01-01T10:00:00Z",
+    "orderDate": "2024-01-01T10:00:00Z",
+    "printedOn": "2024-01-01T10:01:00Z",
+    "manifestedOn": null,
+    "shippedOn": null,
+    "trackingNumber": "RM123456789GB",
+    "packages": [
+      {
+        "packageNumber": 1,
+        "trackingNumber": "RM123456789GB"
+      }
+    ]
+  }
+]
