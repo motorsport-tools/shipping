@@ -1,3 +1,0 @@
- 
- 
-# royalmail_clickdrop tests
