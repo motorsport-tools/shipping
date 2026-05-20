@@ -41,8 +41,68 @@ Click & Drop endpoint coverage is complete for the supplied public specification
 
 ## Rating model
 
-Royal Mail Click & Drop does not expose live rate endpoints in the supplied public API.  
-This integration therefore uses Karrio's universal rate-table mixin to support the `rating` capability from configured carrier service tables.
+Royal Mail Click & Drop does not expose a live rating endpoint in the supplied public API.
+
+This connector therefore uses Karrio's universal local rate-table mixin with Royal Mail-specific pre-processing and post-filtering.
+
+The rating flow is:
+
+1. Load Royal Mail service/rate metadata from `services.csv`.
+2. Expose only active, priced service rows through Karrio references and runtime rating.
+3. Normalize requested raw Royal Mail service selectors into active Karrio service codes where possible.
+4. Normalize parcel weights/dimensions for Karrio universal rating.
+5. Apply Karrio universal local rate-table matching.
+6. Filter returned rates by Royal Mail package-format compatibility.
+7. Filter by requested insurance/compensation coverage.
+8. Filter by requested service features, for example:
+    - `options.is_tracked`
+    - `options.features = ["tracked"]`
+    - `options.signature_confirmation`
+    - `options.dangerous_good`
+    - Royal Mail age / ID verification options
+9. Apply Royal Mail service surcharges:
+    - fuel / energy surcharge
+    - Parcelforce fuel / energy surcharge
+    - green surcharge
+    - date-limited peak surcharge
+10. Apply selected option surcharges:
+
+- signature on delivery
+- age verification
+- ID verification
+
+11. Apply UK VAT when service metadata or connection config says VAT should be added.
+
+Rates are therefore local/static, but the connector still enforces Royal Mail service capability rules before returning Karrio `RateDetails`.
+
+## Service catalogue and selector model
+
+`services.csv` is the source of truth for Royal Mail service metadata.
+
+The connector intentionally separates active runtime services from full Click & Drop metadata:
+
+| Use case                                | Source                                   |
+| --------------------------------------- | ---------------------------------------- |
+| Karrio service references               | active CSV rows with usable rate data    |
+| Karrio rating                           | active CSV rows only                     |
+| `ShippingService` enum                  | active CSV rows only                     |
+| Click & Drop shipment metadata          | full CSV catalogue                       |
+| `serviceRegisterCode` lookup            | full CSV catalogue                       |
+| Return shipment service-code resolution | full return-service catalogue by default |
+| Runtime return-service detection        | active return services only              |
+
+This distinction is required because Royal Mail carrier service codes can be ambiguous or package-format dependent.
+
+Example:
+
+```text
+CRL24 + largeLetter -> serviceRegisterCode 01
+CRL24 + parcel      -> serviceRegisterCode 02
+```
+
+Some parcel metadata rows are inactive for rating/reference purposes but are still required to serialize valid Click & Drop shipment requests.
+
+Raw Royal Mail carrier codes such as `CRL24`, `CRL48`, `OTA`, and `TSS` may be accepted for shipment creation. For rating, raw carrier codes are expanded into active canonical Karrio service codes where possible and then narrowed by package format.
 
 ## Shipping behavior
 
@@ -117,6 +177,15 @@ This integration therefore uses Karrio's universal rate-table mixin to support t
 
 ## Dangerous goods behavior
 
+The connector maps Royal Mail dangerous-goods fields when supplied through shipment options:
+
+- `contains_dangerous_goods`
+- `dangerous_goods_un_code`
+- `dangerous_goods_description`
+- `dangerous_goods_quantity`
+
+The connector performs basic value normalization only. Detailed dangerous-goods eligibility remains the responsibility of the Royal Mail account configuration, service rules, and Click & Drop API validation.
+
 - `dangerous_goods_quantity` is just an integer but surely it should be more than this (this might be a oversight on the royal mail api)
 
 ## Tracking model
@@ -143,27 +212,71 @@ If tracking credentials are not provided the call logic reverts to click and dro
 "Forbidden (Feature not available)"
 
 /orders/{orderIdentifiers}/full:
-  description: Reserved for ChannelShipper customers only
-  '403':
-    description: Forbidden (Feature not available)
+description: Reserved for ChannelShipper customers only
+'403':
+description: Forbidden (Feature not available)
 
 That /full endpoint is not available for normal Click & Drop / OBA accounts. It is ChannelShipper-only customers
 
-## Royal Mail surcharge implementation
+## Royal Mail surcharge and VAT implementation
 
-Royal Mail surcharges are implemented as **data-driven service-level surcharges** on top of Karrio’s universal rating engine.
+Royal Mail surcharges are implemented as data-driven service-level surcharges on top of Karrio's universal rating engine.
 
-The key design decision is:
+`services.csv` contains base rate and surcharge metadata. The connector loads recurring service surcharges into Karrio `ServiceLevel.surcharges`, then filters or augments those surcharges during rating.
 
-> `services.csv` remains the source of for Royal Mail base rates and surcharge values.  
-> The connector loads those surcharge values into Karrio `ServiceLevel.surcharges`, then Karrio’s universal rating engine applies them when calculating rates.
+Implemented surcharge types:
 
-This keeps the surcharge logic carrier-specific where necessary, while reusing Karrio’s existing rating and `ChargeDetails` output format.
+| Surcharge                 | Behaviour                                                                         |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| Fuel / Energy             | Loaded from CSV and applied when present                                          |
+| Parcelforce Fuel / Energy | Loaded from CSV and applied to Parcelforce rows                                   |
+| Green surcharge           | Loaded from CSV and applied when present                                          |
+| Peak surcharge            | Loaded from CSV but only applied inside the configured peak date window           |
+| Signature on delivery     | Option-triggered via `signature_confirmation` / `request_signature_upon_delivery` |
+| Age verification          | Option-triggered via `royalmail_age_verification` / `age_verification`            |
+| ID verification           | Option-triggered via `royalmail_id_verification` / `id_verification`              |
 
-Still to add is handling of VAT as royal mail rates in the services.csv are VAT free.
+Peak surcharge dates can come from service metadata:
 
+- `peak_surcharge_start_date`
+- `peak_surcharge_end_date`
 
+The request date used for peak surcharge selection is resolved from, in order:
 
+1. explicit surcharge/rate date
+2. `planned_despatch_date`
+3. generic shipment/ship/shipping date
+4. current date
+
+### UK VAT
+
+Royal Mail rate rows are treated as VAT-exclusive unless metadata says otherwise.
+
+VAT can be applied when:
+
+- service metadata has `vat_applicable = true`
+- service metadata has `vat_rate_percentage`
+- connection config has `apply_uk_vat_to_rates = true`
+
+VAT is not applied when:
+
+- service metadata has `vat_applicable = false`
+- service metadata has `prices_include_vat = true`
+- VAT has already been added to the rate
+
+VAT is added as a separate Karrio `ChargeDetails` tax line with id:
+
+```text
+royalmail_uk_vat
+```
+
+The rated result includes metadata such as:
+
+- `net_charge`
+- `vat_amount`
+- `gross_charge`
+- `vat_rate_percentage`
+- `prices_include_vat`
 
 ## Important limitations
 

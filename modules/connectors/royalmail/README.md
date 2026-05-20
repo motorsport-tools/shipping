@@ -14,7 +14,7 @@ This extension adds support for:
 - Return-services and version helpers
 - Royal Mail Tracking API support
 
-> Note: the Python package/module path is `royalmail`, but the current Karrio gateway id exposed by this extension is `royalmail`.
+> Note: the Python package/module path is `royalmail`, the current Karrio gateway id exposed by this extension is `royalmail`.
 
 ---
 
@@ -114,7 +114,7 @@ Settings(
 from karrio.mappers.royalmail.settings import Settings
 
 settings = Settings(
-    api_key="YOUR_CLICK_AND_DROP_API_KEY",
+    click_and_drop_api_key="YOUR_CLICK_AND_DROP_API_KEY",
     tracking_client_id="YOUR_TRACKING_CLIENT_ID",
     tracking_client_secret="YOUR_TRACKING_CLIENT_SECRET",
 )
@@ -124,7 +124,7 @@ settings = Settings(
 
 | Field                    | Required | Description                                       |
 | ------------------------ | -------: | ------------------------------------------------- |
-| `api_key`                |      yes | Royal Mail Click & Drop bearer token              |
+| `click_and_drop_api_key` |      yes | Royal Mail Click & Drop bearer token              |
 | `tracking_client_id`     |       no | Royal Mail Tracking API client id                 |
 | `tracking_client_secret` |       no | Royal Mail Tracking API client secret             |
 | `test_mode`              |       no | Standard Karrio flag                              |
@@ -151,12 +151,14 @@ Carrier-specific connection behavior can be configured through `settings.config`
 | `include_return_label_in_response` | `bool` | `False`                                   | Request return label data by default                    |
 | `shipping_options`                 | `list` | `[]`                                      | Optional configured defaults                            |
 | `shipping_services`                | `list` | built-in catalog                          | Optional configured services                            |
+| `apply_uk_vat_to_rates` | `bool` | `False` | Force UK VAT gross-up on locally rated services unless service metadata disables VAT |
+| `uk_vat_rate_percentage` | `float` | `20.0` | VAT rate used when VAT is applied and no service-specific VAT rate is configured |
 
 Example:
 
 ```python
 settings = Settings(
-    api_key="YOUR_CLICK_AND_DROP_API_KEY",
+    click_and_drop_api_key="YOUR_CLICK_AND_DROP_API_KEY",
     tracking_client_id="YOUR_TRACKING_CLIENT_ID",
     tracking_client_secret="YOUR_TRACKING_CLIENT_SECRET",
     config={
@@ -496,50 +498,120 @@ payload, messages = gateway.mapper.parse_retry_manifest_response(
 
 ## Carrier-specific shipment options
 
-The connector exposes Royal Mail-specific options through `options={...}` on shipment requests.
+The connector exposes Royal Mail-specific options through `options={...}` on shipment and rating requests.
 
-Common options include:
+### Service and package options
+
+- `service_code`
+- `service_register_code`
+- `carrier_name`
+- `package_format_identifier`
+
+### Label options
+
+- `include_label_in_response`
+- `include_cn`
+- `include_returns_label`
+
+### Order/reference/date options
 
 - `order_reference`
 - `order_date`
 - `planned_despatch_date`
-- `special_instructions`
-- `service_code`
-- `package_format_identifier`
-- `billing`
-- `importer`
-- `tags`
+
+### Order value options
+
+- `subtotal`
+- `shipping_cost_charged`
+- `shipping_charges`
+- `other_costs`
+- `order_tax`
+- `customs_duty_costs`
+- `total`
+- `currency`
+
+### Notification options
+
 - `send_notifications_to`
-- `carrier_name`
-- `service_register_code`
-- `consequential_loss`
 - `receive_email_notification`
 - `receive_sms_notification`
-- `request_signature_upon_delivery`
-- `is_local_collect`
+- `email_notification_to`
+
+### Delivery instruction options
+
+- `shipment_note`
+- `shipper_instructions`
+- `recipient_instructions`
+- `special_instructions`
 - `safe_place`
 - `department`
+- `is_local_collect`
+
+### Feature/accessorial options
+
+- `is_tracked`
+- `request_signature_upon_delivery`
+- `signature_confirmation`
+- `royalmail_age_verification`
+- `age_verification`
+- `royalmail_id_verification`
+- `id_verification`
+- `consequential_loss`
+
+### International/customs options
+
 - `air_number`
 - `ioss_number`
 - `requires_export_license`
 - `commercial_invoice_number`
 - `commercial_invoice_date`
+- `invoice_number`
+- `invoice_date`
 - `recipient_eori_number`
-- `include_label_in_response`
-- `include_cn`
-- `include_returns_label`
+- `address_book_reference`
+- `importer_vat_number`
+- `importer_tax_code`
+- `importer_eori_number`
+
+### Dangerous goods options
+
 - `contains_dangerous_goods`
+- `dangerous_good`
 - `dangerous_goods_un_code`
 - `dangerous_goods_description`
 - `dangerous_goods_quantity`
 
-For the complete list, see:
+For the authoritative list, see:
 
 - `karrio.providers.royalmail.units.ShippingOption`
 
+
+A LOT OF THESE STILL NEED TO BE MERGED INTO KARRIO SWITCHES AND FIELDS IN THE UI
+
 ---
 
-## Services and packaging
+### Service-code and package-format behaviour
+
+Royal Mail carrier service codes are not always unique Karrio service selectors.
+
+For example, a raw Click & Drop code such as `CRL24` can map to different `serviceRegisterCode` values depending on package format:
+
+```text
+CRL24 + largeLetter -> serviceRegisterCode 01
+CRL24 + parcel      -> serviceRegisterCode 02
+```
+
+The connector therefore exposes active, canonical Karrio service codes for references and rating, while still allowing raw Royal Mail `serviceCode` values for shipment creation where Click & Drop supports them.
+
+For rating, raw carrier codes are expanded into active Karrio service codes and then filtered by package format.
+
+For shipment creation, the connector resolves:
+
+- `serviceCode`
+- `serviceRegisterCode`
+- `packageFormatIdentifier`
+
+from the selected service and package metadata.
 
 This extension provides:
 
@@ -577,6 +649,25 @@ For the authoritative enums, see:
 - `karrio.providers.royalmail.units.PackagingType`
 - `karrio.providers.royalmail.units.PackagePresets`
 
+| Use case | Catalogue used |
+|---|---|
+| Karrio rates/references/service enum | active services only |
+| Shipment metadata lookup, e.g. `serviceRegisterCode` | full CSV catalogue |
+| Return shipment selector resolution | full return catalogue by default |
+| Runtime `is_return_service()` | active return services only |
+
+This matters for raw Royal Mail codes such as:
+
+```text
+CRL24
+CRL48
+OTA
+TSS
+```
+
+For example, `CRL24` is ambiguous as a Karrio service selector but valid as a Click & Drop raw `serviceCode`. The raw carrier codes may pass through for shipment creation, while rating expands them into active canonical Karrio services where possible.
+
+
 ---
 
 ## Important Royal Mail behavior
@@ -602,12 +693,151 @@ Tracking requires separate credentials:
 - `tracking_client_secret`
 
 If those are not supplied, tracking requests will fall back to click and drop api.
+The fallback implementation does **not**  track by tracking number through Click & Drop. Without Royal Mail Tracking API credentials, the connector falls back to Click & Drop order-details lookup:
+
+```text
+GET /orders/{orderIdentifiers}/full
+```
+
+That requires an order identifier or order reference. The implementation can get this from:
+
+- `TrackingRequest.reference`
+- `TrackingRequest.options.order_identifier`
+- `TrackingRequest.options.order_reference`
+- mapped `order_identifiers`
+- mapped `order_references`
+- saved Karrio server shipment/tracker metadata when running inside Karrio server
+
+Also, `/orders/full` is ChannelShipper-limited for accounts, that fallback tracking is account-dependent.
+
+I intend to build a royal mail web based solution but its not implemented yet
 
 ### Ratings are local/static
 
 Royal Mail Click & Drop does not provide a live real-time rating endpoint in this integration.
 
 `Rating.fetch(...)` uses Karrio’s rating mixin and configured service metadata instead of calling a live Royal Mail pricing API.
+
+It now performs:
+
+1. Active-service filtering.
+2. Raw Royal Mail service-code expansion, e.g. `OTA`, `CRL24`, `TPN24`.
+3. Package-format detection/filtering.
+4. Universal rate-table rating.
+5. Royal Mail package-format compatibility filtering.
+6. Insurance/compensation filtering.
+7. Required feature filtering:
+   - `options.is_tracked`
+   - `options.features`
+   - `options.signature_confirmation`
+   - dangerous goods / age verification / ID verification style feature checks
+8. Royal Mail surcharges:
+   - fuel/energy
+   - Parcelforce fuel/energy
+   - green surcharge
+   - peak surcharge
+   - signature option surcharge
+   - age verification surcharge
+   - ID verification surcharge
+9. UK VAT gross-up as a separate tax charge.
+
+
+The connector filters returned rates by:
+
+- active services from `services.csv`
+- package format, e.g. `letter`, `largeLetter`, `smallParcel`, `parcel`
+- requested service selectors
+- requested insurance/compensation coverage
+- requested service features
+- configured service whitelist
+- Royal Mail surcharge rules
+- optional VAT rules
+
+Examples:
+
+```python
+# Return only tracked services.
+models.RateRequest(
+    shipper=shipper,
+    recipient=recipient,
+    parcels=parcels,
+    options={
+        "is_tracked": True,
+    },
+)
+```
+
+```python
+# Equivalent feature-filter form.
+models.RateRequest(
+    shipper=shipper,
+    recipient=recipient,
+    parcels=parcels,
+    options={
+        "features": ["tracked"],
+    },
+)
+```
+
+```python
+# Filter rates to services with enough included compensation.
+models.RateRequest(
+    shipper=shipper,
+    recipient=recipient,
+    parcels=parcels,
+    options={
+        "insurance": 150,
+    },
+)
+```
+
+```python
+# Add signature surcharge where configured for the service.
+models.RateRequest(
+    shipper=shipper,
+    recipient=recipient,
+    parcels=parcels,
+    options={
+        "signature_confirmation": True,
+    },
+)
+```
+
+### UK VAT on local rates
+
+Royal Mail service prices in `services.csv` are treated as VAT-exclusive unless service metadata says otherwise.
+
+VAT can be added to locally rated services when:
+
+- the service row has `vat_applicable = true`
+- the service row has `vat_rate_percentage`
+- connection config has `apply_uk_vat_to_rates = true`
+
+Example:
+
+```python
+settings = Settings(
+    click_and_drop_api_key="YOUR_CLICK_AND_DROP_API_KEY",
+    config={
+        "apply_uk_vat_to_rates": True,
+        "uk_vat_rate_percentage": 20.0,
+    },
+)
+```
+
+VAT is returned as an additional Karrio `ChargeDetails` tax line with id:
+
+```text
+royalmail_uk_vat
+```
+
+The rated result may include metadata:
+
+- `net_charge`
+- `vat_amount`
+- `gross_charge`
+- `vat_rate_percentage`
+
 
 ---
 
