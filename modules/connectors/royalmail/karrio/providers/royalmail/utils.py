@@ -37,6 +37,7 @@ class Settings(core.Settings):
             ]
         )
 
+## dont think i need this anymore
     @property
     def api_key(self) -> str:
         """Return the Click & Drop API key."""

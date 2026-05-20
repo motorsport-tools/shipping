@@ -2043,6 +2043,12 @@ ALL_SERVICE_LEVEL_BY_CODE: typing.Dict[str, models.ServiceLevel] = {
     if service.service_code
 }
 
+ALL_SERVICES_INDEX: typing.Dict[str, models.ServiceLevel] = {
+    str(service.service_code).lower(): service
+    for service in DEFAULT_SERVICES
+    if service.service_code
+}
+
 SERVICE_LEVEL_BY_CODE: typing.Dict[str, models.ServiceLevel] = {
     service.service_code: service
     for service in ACTIVE_DEFAULT_SERVICES
@@ -2213,25 +2219,50 @@ def shipping_services_initializer(
     return units.Services(requested_services, ShippingService)
 
 
-def _service_register_by_carrier_and_format_index() -> dict[tuple[str, str], str]:
-    """Index serviceRegisterCode values by active carrier service code and package kind."""
+def _service_register_by_carrier_and_format_index(
+    services: typing.Iterable[models.ServiceLevel],
+) -> dict[tuple[str, str], str]:
+    """
+    Index serviceRegisterCode values by carrier service code and package kind.
+
+    This must be able to use inactive CSV rows because some inactive rows are
+    intentionally retained as Click & Drop metadata rows. For example:
+
+        CRL24 + largeLetter -> 01
+        CRL24 + parcel      -> 02
+
+    The parcel rows may be inactive for Karrio rating/reference purposes but
+    are still required to serialize Click & Drop shipment requests correctly.
+    """
     index: dict[tuple[str, str], str] = {}
 
-    for service in ACTIVE_DEFAULT_SERVICES:
-        carrier_service_code = str(service.carrier_service_code or "").strip().upper()
+    for service in services or []:
+        carrier_service_code = str(
+            service.carrier_service_code or ""
+        ).strip().upper()
         metadata = service.metadata or {}
 
         service_register_code = metadata.get("service_register_code")
         package_format_kind = metadata.get("package_format_kind")
 
-        if carrier_service_code and service_register_code and package_format_kind:
-            index[(carrier_service_code, package_format_kind)] = service_register_code
+        if not carrier_service_code or not service_register_code or not package_format_kind:
+            continue
+
+        key = (carrier_service_code, package_format_kind)
+
+        # Keep the first value. Duplicate rows such as smallParcel/mediumParcel
+        # should normally agree on the same register code.
+        index.setdefault(key, service_register_code)
 
     return index
 
 
+ACTIVE_SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = (
+    _service_register_by_carrier_and_format_index(ACTIVE_DEFAULT_SERVICES)
+)
+
 SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = (
-    _service_register_by_carrier_and_format_index()
+    _service_register_by_carrier_and_format_index(DEFAULT_SERVICES)
 )
 
 class ReferenceRecord(dict):
@@ -2525,28 +2556,85 @@ def _carrier_services_index() -> dict[str, typing.List[models.ServiceLevel]]:
 
     return index
 
-def _service_selector_index() -> dict[str, typing.Set[str]]:
+def _all_service_selector_index() -> dict[str, typing.Set[str]]:
     """
-    Build an active selector index that preserves ambiguity.
+    Build a selector index from the full CSV catalogue.
 
-    Inactive services are intentionally excluded so raw/friendly selectors cannot
-    resolve to disabled services.
+    This is used to detect ambiguity across active and inactive rows.
+
+    Example:
+        CRL24 appears as large letter and parcel variants. Even if only one row
+        is active, the raw selector CRL24 must not resolve to that one active
+        row because the correct Click & Drop serviceRegisterCode depends on the
+        package format.
     """
     index: dict[str, typing.Set[str]] = {}
 
-    for service in ACTIVE_DEFAULT_SERVICES:
+    for service in DEFAULT_SERVICES:
+        if not service.service_code:
+            continue
+
         for selector in _service_selector_values(service):
             key = _service_selector_key(selector)
+
             if key is not None:
+                index.setdefault(key, set()).add(service.service_code)
+
+    return index
+
+
+def _service_selector_index() -> dict[str, typing.Set[str]]:
+    """
+    Build the active selector index while respecting full-catalogue ambiguity.
+
+    Inactive services are excluded from normal Karrio selector resolution, but
+    inactive rows still count when deciding whether a raw/friendly selector is
+    ambiguous.
+
+    This prevents raw carrier codes such as CRL24 from resolving to whichever
+    package-band row happens to be active.
+    """
+    all_index = _all_service_selector_index()
+    index: dict[str, typing.Set[str]] = {}
+
+    for service in ACTIVE_DEFAULT_SERVICES:
+        if not service.service_code:
+            continue
+
+        for selector in _service_selector_values(service):
+            key = _service_selector_key(selector)
+
+            if key is None:
+                continue
+
+            all_matches = all_index.get(key) or set()
+
+            # Only expose selectors that uniquely identify the same service in
+            # the full CSV catalogue.
+            if len(all_matches) == 1 and service.service_code in all_matches:
                 index.setdefault(key, set()).add(service.service_code)
 
     for name, member in ShippingService.__members__.items():
         for selector in [name, name.replace("_", " "), member.value]:
             key = _service_selector_key(selector)
+
             if key is not None:
                 index.setdefault(key, set()).add(name)
 
     return index
+
+
+SERVICES_INDEX = _services_index()
+CARRIER_SERVICES_INDEX = _carrier_services_index()
+
+ALL_CARRIER_SERVICE_CODES: typing.Set[str] = {
+    str(service.carrier_service_code).strip().upper()
+    for service in DEFAULT_SERVICES
+    if service.carrier_service_code
+}
+
+ALL_SERVICE_SELECTOR_INDEX = _all_service_selector_index()
+SERVICE_SELECTOR_INDEX = _service_selector_index()
 
 
 SERVICES_INDEX = _services_index()
@@ -2691,6 +2779,35 @@ def resolve_service_level(
         return None
 
     return SERVICES_INDEX.get(str(resolved_service_code).lower())
+
+def resolve_any_service_level(
+    service: typing.Optional[str],
+) -> typing.Optional[models.ServiceLevel]:
+    """
+    Resolve an exact service selector against the active catalogue first, then
+    the full CSV catalogue.
+
+    This is intentionally broader than resolve_service_level() and should be
+    used only for carrier/shipment metadata lookups, not for exposing Karrio
+    runtime services or rating references.
+    """
+    service_level = resolve_service_level(service)
+
+    if service_level is not None:
+        return service_level
+
+    if service in [None, ""]:
+        return None
+
+    raw = str(service).strip()
+
+    if raw == "":
+        return None
+
+    return (
+        ALL_SERVICE_LEVEL_BY_CODE.get(raw)
+        or ALL_SERVICES_INDEX.get(raw.lower())
+    )
 
 def _state_or_value(value: typing.Any) -> typing.Any:
     """Return a raw value from a Karrio option state wrapper or scalar."""
@@ -2989,28 +3106,62 @@ def service_supports_package_format(
 
 def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[str]:
     """
-    Resolve any supported selector to the Royal Mail API `serviceCode`.
+    Resolve a supported selector to the Royal Mail API `serviceCode`.
 
-    For ambiguous selectors, callers should pass either:
-    - an exact Karrio `service_code`, or
-    - the raw Royal Mail carrier `serviceCode`
+    Behaviour:
+    - Active Karrio service selectors resolve normally.
+    - Exact inactive CSV service codes may still resolve for direct Click & Drop
+      shipment serialization.
+    - Raw Royal Mail carrier codes such as CRL24 pass through when known in the
+      full CSV catalogue.
+    - Ambiguous raw carrier codes should not be converted to one arbitrary
+      Karrio service_code.
     """
     service_level = resolve_service_level(service)
+
     if service_level is not None:
         return service_level.carrier_service_code
 
-    raw = str(service or "").strip().upper()
-    if raw in CARRIER_SERVICES_INDEX:
-        return raw
+    raw = str(service or "").strip()
+
+    if raw == "":
+        return None
+
+    # Exact inactive/full-catalogue Karrio service_code fallback.
+    service_level = (
+        ALL_SERVICE_LEVEL_BY_CODE.get(raw)
+        or ALL_SERVICES_INDEX.get(raw.lower())
+    )
+
+    if service_level is not None:
+        return service_level.carrier_service_code
+
+    raw_upper = raw.upper()
+
+    # Raw active carrier code passthrough.
+    if raw_upper in CARRIER_SERVICES_INDEX:
+        return raw_upper
+
+    # Raw full-catalogue carrier code passthrough. This is required for direct
+    # Click & Drop shipment creation with raw codes such as CRL24/CRL48.
+    if raw_upper in ALL_CARRIER_SERVICE_CODES:
+        return raw_upper
 
     mapped = ShippingService.map(service)
+
     if getattr(mapped, "enum", None) is not None:
-        service_code = mapped.name if mapped.name in SERVICE_LEVEL_BY_CODE else mapped.value
+        service_code = (
+            mapped.name
+            if mapped.name in SERVICE_LEVEL_BY_CODE
+            else mapped.value
+        )
         service_level = SERVICE_LEVEL_BY_CODE.get(service_code)
+
         if service_level is not None:
             return service_level.carrier_service_code
 
     return None
+
 def resolve_return_carrier_service(
     service: typing.Optional[str],
     include_inactive: bool = True,
@@ -3090,25 +3241,70 @@ def resolve_service_register_code(
     """
     Resolve any supported selector to the Royal Mail API `serviceRegisterCode`.
 
+    Important:
+    This resolver is used for Click & Drop shipment serialization, so it must be
+    broader than the active Karrio rating/reference catalogue.
+
     Rules:
-    - if a carrier/package-kind mapping is explicitly known, use it
-    - if the selected service is package-format flexible, fall back to the
-      service-level default register code
-    - otherwise, only fall back to the service-level default when the requested
-      package kind is compatible with the service metadata
+    - Use package-format-specific carrier mappings first.
+    - Use the full CSV catalogue for these mappings because inactive rows may
+      still contain required Click & Drop register metadata.
+    - Preserve active-only service exposure elsewhere; do not use this function
+      to decide whether a service should appear in Karrio rates/references.
     """
-    carrier_service_code = resolve_carrier_service(service)
+    if service in [None, ""]:
+        return None
+
     package_format_kind = _package_format_register_kind(package_format)
 
-    if carrier_service_code and package_format_kind:
-        service_register_code = SERVICE_REGISTER_BY_CARRIER_AND_FORMAT.get(
-            (carrier_service_code, package_format_kind)
-        )
+    carrier_service_code_candidates: typing.List[str] = []
 
-        if service_register_code not in [None, ""]:
-            return service_register_code
+    def append_carrier_candidate(value: typing.Any) -> None:
+        if value in [None, ""]:
+            return
 
-    service_level = resolve_service_level(service)
+        candidate = str(value).strip().upper()
+
+        if candidate and candidate not in carrier_service_code_candidates:
+            carrier_service_code_candidates.append(candidate)
+
+    append_carrier_candidate(resolve_carrier_service(service))
+
+    raw = str(service or "").strip()
+
+    if raw:
+        raw_upper = raw.upper()
+
+        if raw_upper in ALL_CARRIER_SERVICE_CODES:
+            append_carrier_candidate(raw_upper)
+
+    service_level = resolve_any_service_level(service)
+
+    if service_level is not None:
+        append_carrier_candidate(service_level.carrier_service_code)
+
+    # First resolve by carrier serviceCode + package kind. This is the critical
+    # path for CRL24/CRL48:
+    #
+    #   CRL24 + largeLetter -> 01
+    #   CRL24 + parcel      -> 02
+    if package_format_kind:
+        for carrier_service_code in carrier_service_code_candidates:
+            active_register_code = (
+                ACTIVE_SERVICE_REGISTER_BY_CARRIER_AND_FORMAT.get(
+                    (carrier_service_code, package_format_kind)
+                )
+            )
+
+            if active_register_code not in [None, ""]:
+                return active_register_code
+
+            register_code = SERVICE_REGISTER_BY_CARRIER_AND_FORMAT.get(
+                (carrier_service_code, package_format_kind)
+            )
+
+            if register_code not in [None, ""]:
+                return register_code
 
     if service_level is None:
         return None
@@ -3123,7 +3319,7 @@ def resolve_service_register_code(
 
     carrier_service_code = str(
         service_level.carrier_service_code
-        or carrier_service_code
+        or next(iter(carrier_service_code_candidates), "")
         or ""
     ).strip().upper()
 
@@ -3868,6 +4064,17 @@ class ShippingOption(lib.Enum):
         meta=dict(category="NOTIFICATION"),
     )
 
+        # Rate/service capability filters
+    #
+    # This is primarily used during rating. Click & Drop does not receive an
+    # `is_tracked` field directly; instead, rating uses it to restrict returned
+    # services to services whose CSV feature metadata includes `tracked`.
+    is_tracked = lib.OptionEnum(
+        "is_tracked",
+        bool,
+        meta=dict(category="TRACKING"),
+    )
+
     # Postage details
     consequential_loss = lib.OptionEnum("consequentialLoss", int)
     request_signature_upon_delivery = lib.OptionEnum(
@@ -4020,6 +4227,14 @@ _OPTION_ALIASES = {
     "dangerousGoodsUnCode": "dangerous_goods_un_code",
     "dangerousGoodsDescription": "dangerous_goods_description",
     "dangerousGoodsQuantity": "dangerous_goods_quantity",
+
+    # Rate/service capability filters
+    "is_tracked": "is_tracked",
+    "isTracked": "is_tracked",
+    "tracked": "is_tracked",
+    "tracking": "is_tracked",
+    "tracking_required": "is_tracked",
+    "trackingRequired": "is_tracked",
 }
 
 def canonical_enum_names(enum_type) -> typing.List[str]:
@@ -4058,6 +4273,12 @@ _BOOLEAN_OPTION_KEYS = {
     "royalmail_id_verification",
     "age_verification",
     "id_verification",
+    "is_tracked",
+    "isTracked",
+    "tracked",
+    "tracking",
+    "tracking_required",
+    "trackingRequired",
 }
 
 _CONFIG_BOOLEAN_KEYS = {

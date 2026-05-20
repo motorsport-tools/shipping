@@ -1658,6 +1658,520 @@ def _rate_request_insurance_amount(
         declared_value=declared_value,
     )
 
+_RATE_FEATURE_ALIASES = {
+    # Tracking
+    "is_tracked": "tracked",
+    "istracked": "tracked",
+    "tracked": "tracked",
+    "tracking": "tracked",
+    "tracking_required": "tracked",
+    "trackingrequired": "tracked",
+    "require_tracking": "tracked",
+    "requires_tracking": "tracked",
+
+    # Signature
+    "signature": "signature",
+    "signed": "signature",
+    "signed_for": "signature",
+    "signature_confirmation": "signature",
+    "signatureconfirmation": "signature",
+    "request_signature_upon_delivery": "signature",
+    "requestsignatureupondelivery": "signature",
+
+    # Insurance / compensation
+    "insurance": "insurance",
+    "insured": "insurance",
+    "is_insured": "insurance",
+    "compensation": "insurance",
+    "included_compensation": "insurance",
+
+    # Extra compensation product feature
+    "extra_compensation": "extra_compensation",
+    "extracompensation": "extra_compensation",
+
+    # Shipment direction
+    "return": "returns",
+    "returns": "returns",
+    "return_service": "returns",
+    "is_return": "returns",
+
+    # Identity / age verification
+    "age_check": "age_verification",
+    "age_verification": "age_verification",
+    "ageverification": "age_verification",
+    "royalmail_age_verification": "age_verification",
+    "royalmailageverification": "age_verification",
+
+    "id_verification": "id_verification",
+    "idverification": "id_verification",
+    "royalmail_id_verification": "id_verification",
+    "royalmailidverification": "id_verification",
+
+    # Dangerous goods
+    "dangerous_good": "dangerous_goods",
+    "dangerous_goods": "dangerous_goods",
+    "dangerousgood": "dangerous_goods",
+    "dangerousgoods": "dangerous_goods",
+    "hazmat": "dangerous_goods",
+
+    # Weekend
+    "saturday": "saturday_delivery",
+    "saturday_delivery": "saturday_delivery",
+    "sunday": "sunday_delivery",
+    "sunday_delivery": "sunday_delivery",
+
+    # B2B/B2C
+    "b2b": "b2b",
+    "b2c": "b2c",
+
+    # Express
+    "express": "express",
+    "priority": "express",
+}
+
+
+_RATE_BOOLEAN_FEATURE_OPTIONS = [
+    (
+        (
+            "is_tracked",
+            "isTracked",
+            "tracked",
+            "tracking",
+            "tracking_required",
+            "trackingRequired",
+            "require_tracking",
+            "requires_tracking",
+        ),
+        ("tracked",),
+    ),
+    (
+        (
+            "signature_confirmation",
+            "signatureConfirmation",
+            "request_signature_upon_delivery",
+            "requestSignatureUponDelivery",
+        ),
+        ("signature",),
+    ),
+    (
+        (
+            "dangerous_good",
+            "dangerousGood",
+            "contains_dangerous_goods",
+            "containsDangerousGoods",
+        ),
+        ("dangerous_goods",),
+    ),
+    (
+        (
+            "saturday_delivery",
+            "saturdayDelivery",
+        ),
+        ("saturday_delivery",),
+    ),
+    (
+        (
+            "sunday_delivery",
+            "sundayDelivery",
+        ),
+        ("sunday_delivery",),
+    ),
+    (
+        (
+            "royalmail_age_verification",
+            "royalmailAgeVerification",
+            "age_verification",
+            "ageVerification",
+        ),
+        ("age_verification",),
+    ),
+    (
+        (
+            "royalmail_id_verification",
+            "royalmailIdVerification",
+            "id_verification",
+            "idVerification",
+        ),
+        ("id_verification",),
+    ),
+]
+
+def _truthy_option_value(value: typing.Any) -> bool:
+    """Return whether an option value should be treated as enabled."""
+    if value in [None, ""]:
+        return False
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        return value.strip().lower() in [
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+            "enabled",
+        ]
+
+    return bool(value)
+
+
+def _rate_feature_tokens(value: typing.Any) -> typing.List[str]:
+    """
+    Normalize a free-form feature value into raw feature tokens.
+
+    Supports:
+        options.features = ["tracked", "signature"]
+        options.features = "tracked:signature"
+        options.features = {"tracked": true, "signature": false}
+    """
+    if value is None:
+        return []
+
+    if isinstance(value, dict):
+        return [
+            str(key).strip()
+            for key, enabled in value.items()
+            if key not in [None, ""]
+            and _truthy_option_value(enabled)
+        ]
+
+    if isinstance(value, (list, tuple, set)):
+        tokens = []
+
+        for item in value:
+            tokens.extend(_rate_feature_tokens(item))
+
+        return tokens
+
+    text = str(value).strip()
+
+    if text == "":
+        return []
+
+    for separator in [",", ";", "|", ":"]:
+        text = text.replace(separator, ",")
+
+    return [
+        token.strip()
+        for token in text.split(",")
+        if token.strip()
+    ]
+
+
+def _normalize_rate_feature_name(
+    feature: typing.Any,
+) -> typing.Optional[str]:
+    """Normalize requested feature selectors to ServiceLevelFeatures names."""
+    if feature in [None, ""]:
+        return None
+
+    key = str(feature).strip()
+
+    if key == "":
+        return None
+
+    key = key.replace("-", "_").replace(" ", "_")
+    key = key.replace(".", "_")
+    normalized = key.lower()
+
+    if normalized.startswith("features_"):
+        normalized = normalized.removeprefix("features_")
+
+    return _RATE_FEATURE_ALIASES.get(normalized, normalized)
+
+
+def _append_unique_feature(
+    features: typing.List[str],
+    feature: typing.Optional[str],
+) -> None:
+    """Append a normalized feature once."""
+    feature = _normalize_rate_feature_name(feature)
+
+    if feature and feature not in features:
+        features.append(feature)
+
+
+def _rate_request_required_features(
+    rate_request: typing.Any,
+) -> typing.List[str]:
+    """
+    Resolve required service features from a Karrio RateRequest.
+
+    Supported inputs:
+        options.features = ["tracked"]
+        options.required_features = ["tracked"]
+        options.is_tracked = true
+        options.signature_confirmation = true
+        options.dangerous_good = true
+        rate_request.is_return = true
+    """
+    options = _request_value(rate_request, "options", {}) or {}
+
+    required_features: typing.List[str] = []
+
+    raw_features = _option_value(
+        options,
+        "features",
+        "service_features",
+        "serviceFeatures",
+        "required_features",
+        "requiredFeatures",
+    )
+
+    for feature in _rate_feature_tokens(raw_features):
+        _append_unique_feature(required_features, feature)
+
+    for option_names, feature_names in _RATE_BOOLEAN_FEATURE_OPTIONS:
+        if _option_enabled(options, *option_names):
+            for feature_name in feature_names:
+                _append_unique_feature(required_features, feature_name)
+
+    if _truthy_option_value(_request_value(rate_request, "is_return", False)):
+        _append_unique_feature(required_features, "returns")
+
+    return required_features
+
+
+def _service_level_for_rate(
+    rate: models.RateDetails,
+    settings: provider_settings.Settings,
+) -> typing.Optional[models.ServiceLevel]:
+    """
+    Resolve the ServiceLevel used to produce a rate.
+
+    Prefer the connection settings so custom service tables can still be
+    inspected. Fall back to the default Royal Mail CSV indexes.
+    """
+    selector = getattr(rate, "service", None)
+
+    if selector in [None, ""]:
+        return None
+
+    for service in settings.shipping_services or []:
+        if service.service_code == selector:
+            return service
+
+    return provider_units.resolve_service_level(selector)
+
+
+def _service_feature_value(
+    service: models.ServiceLevel,
+    feature_name: str,
+) -> typing.Any:
+    """Read a feature value from dict/attrs ServiceLevelFeatures."""
+    features = getattr(service, "features", None)
+
+    if features is None:
+        return None
+
+    if isinstance(features, dict):
+        return features.get(feature_name)
+
+    return getattr(features, feature_name, None)
+
+
+def _service_metadata_feature_codes(
+    service: models.ServiceLevel,
+) -> typing.Set[str]:
+    """Return normalized raw feature tokens preserved from services.csv."""
+    metadata = getattr(service, "metadata", {}) or {}
+
+    if not isinstance(metadata, dict):
+        return set()
+
+    return {
+        feature
+        for feature in (
+            _normalize_rate_feature_name(token)
+            for token in _rate_feature_tokens(metadata.get("feature_codes"))
+        )
+        if feature
+    }
+
+
+def _option_surcharge_definition(
+    surcharge_id: str,
+) -> typing.Optional[dict]:
+    """Return a Royal Mail option-surcharge definition by id."""
+    return next(
+        (
+            definition
+            for definition in ROYALMAIL_OPTION_SURCHARGE_DEFINITIONS
+            if definition.get("id") == surcharge_id
+        ),
+        None,
+    )
+
+
+def _service_has_option_surcharge_metadata(
+    service: models.ServiceLevel,
+    options: typing.Any,
+    surcharge_id: str,
+) -> bool:
+    """
+    Return whether the service can support an option through surcharge metadata.
+
+    `0` means included/free and should still count as supported.
+    `None` means not configured for this service.
+    """
+    definition = _option_surcharge_definition(surcharge_id)
+
+    if definition is None:
+        return False
+
+    return _metadata_amount_for_definition(
+        service,
+        options,
+        definition,
+    ) is not None
+
+
+def _service_supports_rate_feature(
+    service: models.ServiceLevel,
+    feature: str,
+    options: typing.Any,
+) -> bool:
+    """
+    Return whether a Royal Mail service can satisfy a requested rate feature.
+
+    Important distinction:
+    - `features.signature = true` means the base service is signed.
+    - A blank/false `features.signature` service may still support
+      `signature_confirmation` through Royal Mail's optional signature surcharge.
+    """
+    if service is None or feature in [None, ""]:
+        return True
+
+    feature = _normalize_rate_feature_name(feature)
+
+    if feature is None:
+        return True
+
+    metadata = getattr(service, "metadata", {}) or {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+
+    feature_codes = _service_metadata_feature_codes(service)
+
+    # Raw CSV feature tokens are the source of truth when present.
+    if feature in feature_codes:
+        return True
+
+    if feature == "tracked":
+        return _service_feature_value(service, "tracked") is True
+
+    if feature == "signature":
+        return (
+            _service_feature_value(service, "signature") is True
+            or _service_has_option_surcharge_metadata(
+                service,
+                options,
+                provider_units.ROYALMAIL_SIGNATURE_SURCHARGE_ID,
+            )
+        )
+
+    if feature == "age_verification":
+        return (
+            _service_feature_value(service, "age_check") not in [None, "", False]
+            or _service_has_option_surcharge_metadata(
+                service,
+                options,
+                provider_units.ROYALMAIL_AGE_VERIFICATION_SURCHARGE_ID,
+            )
+        )
+
+    if feature == "id_verification":
+        return _service_has_option_surcharge_metadata(
+            service,
+            options,
+            provider_units.ROYALMAIL_ID_VERIFICATION_SURCHARGE_ID,
+        )
+
+    if feature == "insurance":
+        if _service_feature_value(service, "insurance") is True:
+            return True
+
+        included_compensation = provider_units.included_compensation_amount(service)
+        return included_compensation is not None and included_compensation > 0
+
+    if feature == "returns":
+        shipment_type = _service_feature_value(service, "shipment_type")
+
+        return (
+            shipment_type in ["return", "returns", "both"]
+            or metadata.get("return_service") is True
+        )
+
+    if feature == "outbound":
+        shipment_type = _service_feature_value(service, "shipment_type")
+
+        return shipment_type in [None, "", "outbound", "both"]
+
+    # Generic structured boolean features:
+    # b2c, b2b, express, dangerous_goods, saturday_delivery, sunday_delivery, etc.
+    value = _service_feature_value(service, feature)
+
+    if isinstance(value, bool):
+        return value is True
+
+    if value not in [None, "", False]:
+        return True
+
+    return False
+
+
+def _rate_supports_required_features(
+    rate: models.RateDetails,
+    required_features: typing.Iterable[str],
+    settings: provider_settings.Settings,
+    options: typing.Any,
+) -> bool:
+    """Return whether a rated service satisfies all requested features."""
+    required_features = [
+        feature
+        for feature in (
+            _normalize_rate_feature_name(feature)
+            for feature in required_features or []
+        )
+        if feature
+    ]
+
+    if not required_features:
+        return True
+
+    service = _service_level_for_rate(rate, settings)
+
+    # Do not block custom/externally configured services we cannot inspect.
+    if service is None:
+        return True
+
+    return all(
+        _service_supports_rate_feature(
+            service,
+            feature,
+            options,
+        )
+        for feature in required_features
+    )
+
+
+def _required_features_text(
+    required_features: typing.Iterable[str],
+) -> str:
+    """Human-readable feature list for rating messages."""
+    return ", ".join(
+        sorted(
+            {
+                feature
+                for feature in (
+                    _normalize_rate_feature_name(feature)
+                    for feature in required_features or []
+                )
+                if feature
+            }
+        )
+    )
 
 def _with_royalmail_compensation_rate_meta(
     rate: models.RateDetails,
@@ -1707,22 +2221,29 @@ def _filter_package_rates_by_package_format(
     settings: provider_settings.Settings,
 ) -> typing.List[typing.Tuple[str, typing.Any]]:
     """
-    Remove locally rated services that are incompatible with requested Royal
-    Mail package format and requested Karrio insurance coverage.
+    Remove locally rated services that are incompatible with the request.
 
-    Karrio UI insurance flow:
-        Add insurance coverage
-        Coverage value = 2100
+    Filters applied here:
 
-    Payload:
-        options.insurance = 2100
+    1. Royal Mail package format.
+    2. Karrio insurance coverage.
+    3. Requested service features/capabilities.
 
-    Royal Mail behaviour:
-        only return services where services.csv included_compensation >= 2100.
+    Feature examples:
+        options.is_tracked = true
+        options.features = ["tracked"]
+        options.signature_confirmation = true
+        options.dangerous_good = true
+
+    This is intentionally done in the Royal Mail extension because Karrio's
+    universal RatingMixinProxy currently passes `required_features` through but
+    does not enforce it inside get_available_rates().
     """
     package_formats = _rate_request_package_formats(rate_request)
     requested_services = _requested_rate_services(rate_request)
     requested_insurance = _rate_request_insurance_amount(rate_request)
+    requested_features = _rate_request_required_features(rate_request)
+    request_options = _request_value(rate_request, "options", {}) or {}
 
     filtered_response = []
 
@@ -1746,8 +2267,8 @@ def _filter_package_rates_by_package_format(
             )
         ]
 
-        filtered_rates = [
-            _with_royalmail_compensation_rate_meta(rate)
+        insurance_filtered_rates = [
+            rate
             for rate in package_filtered_rates
             if provider_units.service_supports_insurance(
                 rate.service,
@@ -1755,9 +2276,35 @@ def _filter_package_rates_by_package_format(
             )
         ]
 
-        filtered_service_codes = {rate.service for rate in filtered_rates}
+        feature_filtered_rates = [
+            rate
+            for rate in insurance_filtered_rates
+            if _rate_supports_required_features(
+                rate,
+                requested_features,
+                settings,
+                request_options,
+            )
+        ]
+
+        filtered_rates = [
+            _with_royalmail_compensation_rate_meta(rate)
+            for rate in feature_filtered_rates
+        ]
+
+        filtered_service_codes = {
+            rate.service
+            for rate in filtered_rates
+        }
+
         package_filtered_service_codes = {
-            rate.service for rate in package_filtered_rates
+            rate.service
+            for rate in package_filtered_rates
+        }
+
+        insurance_filtered_service_codes = {
+            rate.service
+            for rate in insurance_filtered_rates
         }
 
         removed_package_requested_services = [
@@ -1778,6 +2325,10 @@ def _filter_package_rates_by_package_format(
                         f"with package format `{package_format}`: "
                         f"{', '.join(removed_package_requested_services)}"
                     ),
+                    details={
+                        "package_format": package_format,
+                        "operation": "rating",
+                    },
                 )
             )
 
@@ -1785,7 +2336,7 @@ def _filter_package_rates_by_package_format(
             rate.service
             for rate in package_filtered_rates
             if rate.service in requested_services
-            and rate.service not in filtered_service_codes
+            and rate.service not in insurance_filtered_service_codes
         ]
 
         if requested_insurance is not None and any(
@@ -1804,6 +2355,32 @@ def _filter_package_rates_by_package_format(
                     ),
                     details={
                         "requested_coverage": requested_insurance,
+                        "operation": "rating",
+                    },
+                )
+            )
+
+        removed_feature_requested_services = [
+            rate.service
+            for rate in insurance_filtered_rates
+            if rate.service in requested_services
+            and rate.service not in filtered_service_codes
+        ]
+
+        if any(requested_features) and any(removed_feature_requested_services):
+            messages.append(
+                models.Message(
+                    carrier_id=settings.carrier_id,
+                    carrier_name=settings.carrier_name,
+                    code="required_feature_not_supported",
+                    message=(
+                        "The requested Royal Mail service does not support "
+                        f"required feature(s) "
+                        f"`{_required_features_text(requested_features)}`: "
+                        f"{', '.join(removed_feature_requested_services)}"
+                    ),
+                    details={
+                        "required_features": list(requested_features),
                         "operation": "rating",
                     },
                 )

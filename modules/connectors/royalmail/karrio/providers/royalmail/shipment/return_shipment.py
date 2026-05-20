@@ -322,17 +322,11 @@ def return_shipment_request(
             "`config.shipping_services`."
         )
 
-    service_code = provider_units.resolve_carrier_service(selected_service)
+    service_code = provider_units.resolve_return_carrier_service(selected_service)
 
     if service_code is None:
         raise ValueError(
             f"Invalid Royal Mail Click & Drop return service selector: {selected_service}"
-        )
-
-    if not provider_units.is_return_service(service_code):
-        raise ValueError(
-            "Royal Mail Click & Drop return shipments require a return service "
-            f"code. Got: {selected_service}"
         )
 
     request = royalmail_return_req.ReturnRequestType(
