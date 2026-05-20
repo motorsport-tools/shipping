@@ -51,6 +51,58 @@ def _to_bool(
 
     raise ValueError(f"Invalid boolean value in Royal Mail services.csv: {value!r}")
 
+def is_active_flag(
+    value: typing.Any,
+    default: bool = True,
+) -> bool:
+    """
+    Normalize an active/enabled flag defensively.
+
+    Why this exists:
+    - services.csv loads booleans correctly.
+    - Karrio server/rate-sheet/reference paths can sometimes round-trip values
+      as strings such as "False".
+    - Python treats non-empty strings as truthy, so `if service.active` would
+      incorrectly include `"False"` services in rates.
+    """
+    if value is None:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    try:
+        parsed = _to_bool(value, default=default)
+    except ValueError:
+        # Unknown non-empty values are treated as enabled for backward
+        # compatibility, but known CSV/config false values are handled above.
+        return default if str(value).strip() == "" else bool(value)
+
+    return default if parsed is None else parsed
+
+
+def service_is_active(
+    service: typing.Any,
+    default: bool = True,
+) -> bool:
+    """Return whether a service-like object/dict should be exposed/rated."""
+    if isinstance(service, dict):
+        value = service.get("active", default)
+    else:
+        value = getattr(service, "active", default)
+
+    return is_active_flag(value, default=default) is True
+
+
+def active_service_levels(
+    services: typing.Optional[typing.Iterable[typing.Any]],
+) -> typing.List[typing.Any]:
+    """Return only active service definitions."""
+    return [
+        service
+        for service in list(services or [])
+        if service_is_active(service)
+    ]
 
 def _to_float(
     value: typing.Any,
@@ -1831,15 +1883,23 @@ def load_services_from_csv(
     ]
 
 DEFAULT_SERVICES = load_services_from_csv()
+ACTIVE_DEFAULT_SERVICES = active_service_levels(DEFAULT_SERVICES)
+
+ALL_SERVICE_LEVEL_BY_CODE: typing.Dict[str, models.ServiceLevel] = {
+    service.service_code: service
+    for service in DEFAULT_SERVICES
+    if service.service_code
+}
 
 SERVICE_LEVEL_BY_CODE: typing.Dict[str, models.ServiceLevel] = {
     service.service_code: service
-    for service in DEFAULT_SERVICES
+    for service in ACTIVE_DEFAULT_SERVICES
+    if service.service_code
 }
 
 SERVICE_CODE_BY_CARRIER_CODE: typing.Dict[str, str] = {}
 
-for service in DEFAULT_SERVICES:
+for service in ACTIVE_DEFAULT_SERVICES:
     if service.carrier_service_code:
         SERVICE_CODE_BY_CARRIER_CODE.setdefault(
             service.carrier_service_code,
@@ -1851,34 +1911,32 @@ def _create_shipping_service_enum(
     service_levels: typing.List[models.ServiceLevel],
 ) -> typing.Type[lib.Enum]:
     """
-    Create the Karrio ShippingService enum from services.csv.
+    Create the Karrio ShippingService enum from active services.csv rows.
 
     Important:
     The enum value is intentionally the Karrio service_code, not the Royal Mail
     API serviceCode. The Royal Mail API code is stored in
     ServiceLevel.carrier_service_code.
 
-    This avoids enum aliasing if two Royal Mail service definitions ever share
-    the same carrier_service_code but differ by metadata such as
-    service_register_code.
+    Inactive rows are excluded so they do not appear in Karrio service selectors.
     """
     members = {
         service.service_code: service.service_code
         for service in service_levels
-        if service.active is not False
+        if service_is_active(service)
     }
 
     return units.create_enum("ShippingService", members)
 
 
-ShippingService = _create_shipping_service_enum(DEFAULT_SERVICES)
+ShippingService = _create_shipping_service_enum(ACTIVE_DEFAULT_SERVICES)
 
 
 DEFAULT_SERVICE_CODE = next(
     (
         service.service_code
-        for service in DEFAULT_SERVICES
-        if service.active is not False
+        for service in ACTIVE_DEFAULT_SERVICES
+        if service.service_code
     ),
     None,
 )
@@ -2004,10 +2062,10 @@ def shipping_services_initializer(
 
 
 def _service_register_by_carrier_and_format_index() -> dict[tuple[str, str], str]:
-    """Index serviceRegisterCode values by carrier service code and package kind."""
+    """Index serviceRegisterCode values by active carrier service code and package kind."""
     index: dict[tuple[str, str], str] = {}
 
-    for service in DEFAULT_SERVICES:
+    for service in ACTIVE_DEFAULT_SERVICES:
         carrier_service_code = str(service.carrier_service_code or "").strip().upper()
         metadata = service.metadata or {}
 
@@ -2061,7 +2119,7 @@ class ReferenceRecord(dict):
 
 
 REFERENCE_SERVICE_LEVELS = ReferenceRecord.wrap(
-    lib.to_dict(DEFAULT_SERVICES, clear_empty=False)
+    lib.to_dict(ACTIVE_DEFAULT_SERVICES, clear_empty=False)
 )
 
 
@@ -2087,19 +2145,19 @@ def _service_selector_values(service: models.ServiceLevel) -> typing.List[str]:
 
 
 def _services_index() -> dict[str, models.ServiceLevel]:
-    """Build the canonical service-code lookup table."""
+    """Build the active canonical service-code lookup table."""
     return {
         str(service.service_code).lower(): service
-        for service in DEFAULT_SERVICES
+        for service in ACTIVE_DEFAULT_SERVICES
         if service.service_code
     }
 
 
 def _carrier_services_index() -> dict[str, typing.List[models.ServiceLevel]]:
-    """Build the carrier service-code lookup table."""
+    """Build the active carrier service-code lookup table."""
     index: dict[str, typing.List[models.ServiceLevel]] = {}
 
-    for service in DEFAULT_SERVICES:
+    for service in ACTIVE_DEFAULT_SERVICES:
         carrier_service_code = str(service.carrier_service_code or "").strip().upper()
 
         if carrier_service_code == "":
@@ -2109,22 +2167,16 @@ def _carrier_services_index() -> dict[str, typing.List[models.ServiceLevel]]:
 
     return index
 
-
 def _service_selector_index() -> dict[str, typing.Set[str]]:
     """
-    Build a selector index that preserves ambiguity.
+    Build an active selector index that preserves ambiguity.
 
-    A selector may map to more than one `service_code` in Royal Mail's catalog,
-    for example:
-    - `CRL24`
-    - `Royal Mail 24`
-
-    Returning a set allows the resolver to reject ambiguous selectors instead of
-    silently picking the last CSV row.
+    Inactive services are intentionally excluded so raw/friendly selectors cannot
+    resolve to disabled services.
     """
     index: dict[str, typing.Set[str]] = {}
 
-    for service in DEFAULT_SERVICES:
+    for service in ACTIVE_DEFAULT_SERVICES:
         for selector in _service_selector_values(service):
             key = _service_selector_key(selector)
             if key is not None:
@@ -2145,10 +2197,10 @@ SERVICE_SELECTOR_INDEX = _service_selector_index()
 
 
 def _return_service_codes_index() -> typing.Set[str]:
-    """Build return service carrier codes from services.csv."""
+    """Build active return service carrier codes from services.csv."""
     return {
         str(service.carrier_service_code).strip().upper()
-        for service in DEFAULT_SERVICES
+        for service in ACTIVE_DEFAULT_SERVICES
         if service.carrier_service_code
         and (
             (service.metadata or {}).get("return_service") is True
@@ -2934,18 +2986,25 @@ def resolve_rate_service_codes(
     package_formats: typing.Optional[typing.Iterable[str]] = None,
 ) -> typing.List[str]:
     """
-    Resolve a user-supplied rate service selector into canonical Karrio service
-    codes.
+    Resolve a user-supplied rate service selector into active canonical Karrio
+    service codes.
 
-    This expands ambiguous raw Royal Mail carrier service codes when package
-    format information is available.
-
-    Example:
-        OTA + largeLetter  -> royal_mail_international_tracked_large_letter
-        OTA + smallParcel  -> royal_mail_international_tracked_small_parcel
-        OTA + mediumParcel -> royal_mail_international_tracked_medium_parcel
+    Important:
+    - Exact inactive service_code values return [].
+    - Raw Royal Mail carrier codes expand only to active matching services.
+    - Unknown custom selectors are preserved for backward compatibility.
     """
     if service in [None, ""]:
+        return []
+
+    raw_text = str(service).strip()
+
+    if raw_text == "":
+        return []
+
+    exact_service_level = ALL_SERVICE_LEVEL_BY_CODE.get(raw_text)
+
+    if exact_service_level is not None and not service_is_active(exact_service_level):
         return []
 
     canonical_service_code = resolve_service_code(service)
@@ -2953,11 +3012,15 @@ def resolve_rate_service_codes(
     if canonical_service_code is not None:
         return [canonical_service_code]
 
-    raw_carrier_code = str(service).strip().upper()
-    carrier_matches = CARRIER_SERVICES_INDEX.get(raw_carrier_code) or []
+    raw_carrier_code = raw_text.upper()
+    carrier_matches = [
+        service_level
+        for service_level in (CARRIER_SERVICES_INDEX.get(raw_carrier_code) or [])
+        if service_is_active(service_level)
+    ]
 
     if not any(carrier_matches):
-        return [str(service).strip()]
+        return [raw_text]
 
     formats = [
         package_format
@@ -2968,9 +3031,6 @@ def resolve_rate_service_codes(
     resolved = []
 
     for service_level in carrier_matches:
-        if getattr(service_level, "active", True) is False:
-            continue
-
         if any(formats) and not any(
             service_supports_package_format(
                 service_level.service_code,

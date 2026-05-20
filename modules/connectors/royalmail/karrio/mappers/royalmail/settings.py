@@ -34,7 +34,6 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
         dict(default=provider_units.DEFAULT_SERVICES),
     ]  # type: ignore
 
-    # Keeping the existing pattern used across connectors for now.
     metadata: dict = {}
     config: dict = {}
 
@@ -42,9 +41,8 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
     def configured_shipping_service_codes(self) -> typing.List[str]:
         """
         Normalize configured service selectors from connection config into
-        canonical Karrio `service_code` values.
+        active canonical Karrio `service_code` values.
 
-        Important:
         Royal Mail Click & Drop carrier service codes are often ambiguous.
 
         Example:
@@ -53,8 +51,8 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
             OTA -> International Tracked Medium Parcel
 
         For connection-level config we do not know the parcel format yet, so an
-        ambiguous raw carrier code must expand to all matching active Karrio
-        service codes. The proxy later narrows the request by package format.
+        ambiguous raw carrier code expands to all matching active Karrio service
+        codes. The proxy later narrows the request by package format.
         """
         configured = self.connection_config.shipping_services.state or []
 
@@ -95,13 +93,24 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
     @property
     def shipping_services(self) -> typing.List[models.ServiceLevel]:
         """
-        Return the available shipping services, optionally filtered by
+        Return active shipping services, optionally filtered by
         `config.shipping_services`.
 
-        Raw Royal Mail carrier codes such as OTA are expanded by
-        `configured_shipping_service_codes`.
+        Important:
+        Do not use `self.services or DEFAULT_SERVICES` here.
+
+        An empty service list can be intentional after active filtering. For
+        example, if a rate table row arrives with active="False", the runtime
+        active filter should produce [] and must not fall back to every default
+        Royal Mail service.
         """
-        base_services = list(self.services or provider_units.DEFAULT_SERVICES)
+        raw_services = (
+            self.services
+            if self.services is not None
+            else provider_units.DEFAULT_SERVICES
+        )
+
+        base_services = provider_units.active_service_levels(raw_services)
         configured = self.connection_config.shipping_services.state or []
 
         if not any(configured):
@@ -132,22 +141,29 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
         Supports canonical Karrio service codes and raw Royal Mail carrier codes.
         """
         configured = self.connection_config.shipping_services.state or []
+
         if not any(configured):
             return True
 
         allowed_services = list(self.shipping_services or [])
-        allowed_service_codes = {service.service_code for service in allowed_services}
+        allowed_service_codes = {
+            item.service_code
+            for item in allowed_services
+            if provider_units.service_is_active(item)
+        }
         allowed_carrier_codes = {
-            str(service.carrier_service_code or "").strip().upper()
-            for service in allowed_services
-            if service.carrier_service_code
+            str(item.carrier_service_code or "").strip().upper()
+            for item in allowed_services
+            if item.carrier_service_code and provider_units.service_is_active(item)
         }
 
         resolved_service_code = provider_units.resolve_service_code(service)
+
         if resolved_service_code in allowed_service_codes:
             return True
 
         carrier_service_code = provider_units.resolve_carrier_service(service)
+
         if carrier_service_code and str(carrier_service_code).strip().upper() in allowed_carrier_codes:
             return True
 
@@ -158,10 +174,12 @@ class Settings(provider_utils.Settings, rating_proxy.RatingMixinSettings):
         Check whether a shipping option is allowed by `config.shipping_options`.
         """
         configured = self.connection_config.shipping_options.state or []
+
         if not any(configured):
             return True
 
         normalized_name = provider_units.normalize_shipping_option_name(option_name)
+
         if normalized_name is None:
             return True
 

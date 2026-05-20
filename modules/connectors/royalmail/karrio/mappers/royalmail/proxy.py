@@ -1374,10 +1374,24 @@ def _settings_for_universal_rating(
         service.metadata.signature_surcharge_amount = 2.00
         -> add GBP 2.00 Signature on delivery to the local rate.
 
-    This avoids changing the global DEFAULT_SERVICES object.
+    Important:
+    Do not use `settings.services or DEFAULT_SERVICES`.
+
+    If `settings.services` is an explicit empty list after active filtering, we
+    must preserve that empty list. Otherwise inactive rows such as
+    active="False" can be filtered out, then accidentally replaced by the full
+    default Royal Mail rate table.
     """
     surcharge_date = _rate_request_surcharge_date(rate_request)
     options = _request_value(rate_request, "options", {}) or {}
+
+    raw_services = (
+        settings.services
+        if settings.services is not None
+        else provider_units.DEFAULT_SERVICES
+    )
+
+    active_services = provider_units.active_service_levels(raw_services)
 
     return attr.evolve(
         settings,
@@ -1389,7 +1403,7 @@ def _settings_for_universal_rating(
                     options=options,
                 )
             )
-            for service in (settings.services or provider_units.DEFAULT_SERVICES)
+            for service in active_services
         ],
     )
 
@@ -1541,57 +1555,15 @@ def _resolve_rate_service_codes(
     package_formats: typing.Optional[typing.Iterable[str]] = None,
 ) -> typing.List[str]:
     """
-    Resolve a requested Royal Mail rate service selector into canonical Karrio
-    service codes.
+    Resolve a requested Royal Mail rate service selector into active canonical
+    Karrio service codes.
 
-    This is needed because Royal Mail carrier service codes can be ambiguous:
-
-        OTA -> International Tracked Large Letter
-        OTA -> International Tracked Small Parcel
-        OTA -> International Tracked Medium Parcel
-
-    Karrio universal rating expects canonical `service_code` values from
-    services.csv, not raw carrier codes.
+    Delegates to provider_units so active filtering is defined in one place.
     """
-    if service in [None, ""]:
-        return []
-
-    canonical = provider_units.resolve_service_code(service)
-
-    if canonical is not None:
-        return [canonical]
-
-    raw = str(service).strip()
-    carrier_code = raw.upper()
-    carrier_matches = provider_units.CARRIER_SERVICES_INDEX.get(carrier_code) or []
-
-    if not any(carrier_matches):
-        return [raw]
-
-    formats = [
-        package_format
-        for package_format in (package_formats or [])
-        if package_format not in [None, ""]
-    ]
-
-    resolved = []
-
-    for service_level in carrier_matches:
-        if getattr(service_level, "active", True) is False:
-            continue
-
-        if any(formats) and not any(
-            provider_units.service_supports_package_format(
-                service_level.service_code,
-                package_format,
-            )
-            for package_format in formats
-        ):
-            continue
-
-        resolved.append(service_level.service_code)
-
-    return list(dict.fromkeys(resolved))
+    return provider_units.resolve_rate_service_codes(
+        service,
+        package_formats=package_formats,
+    )
 
 
 def _normalize_rate_request_services_for_rating(
