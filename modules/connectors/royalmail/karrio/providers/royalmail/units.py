@@ -434,6 +434,55 @@ def _convert_weight_value(
 
     return kg
 
+RATE_TABLE_MIN_WEIGHT = 0.001
+RATE_TABLE_WEIGHT_PRECISION = 6
+
+
+def _round_rate_table_weight(value: typing.Any) -> typing.Optional[float]:
+    """Round rate-table weights for stable JSON/UI output.
+
+    Karrio rate sheets store service_rates in JSON. Without rounding, converted
+    gram values such as 250.001g can render as 0.25000100000000003 KG in the UI.
+    """
+    if value is None:
+        return None
+
+    return round(float(value), RATE_TABLE_WEIGHT_PRECISION)
+
+
+def _normalize_rate_table_weight_band(
+    min_weight: typing.Any,
+    max_weight: typing.Any,
+) -> typing.Tuple[typing.Optional[float], typing.Optional[float]]:
+    """Normalize a Royal Mail rate-table weight band.
+
+    Rules:
+    - ServiceZone rate bands must have both min and max weight.
+    - The lower bound cannot be 0.
+    - Karrio rating uses min inclusive / max exclusive:
+        min_weight <= package_weight < max_weight
+    - Therefore overlapping bands must be corrected before they become
+      service_rates.
+
+    The values passed to this helper must already be converted into the
+    Karrio service weight unit, normally KG for Royal Mail.
+    """
+    normalized_min = _round_rate_table_weight(min_weight)
+    normalized_max = _round_rate_table_weight(max_weight)
+
+    if normalized_min is None or normalized_max is None:
+        return None, None
+
+    if normalized_min <= 0 or normalized_min < RATE_TABLE_MIN_WEIGHT:
+        normalized_min = RATE_TABLE_MIN_WEIGHT
+
+    normalized_min = _round_rate_table_weight(normalized_min)
+    normalized_max = _round_rate_table_weight(normalized_max)
+
+    if normalized_max is None or normalized_max <= normalized_min:
+        return None, None
+
+    return normalized_min, normalized_max
 
 def _convert_dimension_value(
     value: typing.Any,
@@ -744,7 +793,6 @@ def _royalmail_zone_template_keys_for_row(
 
     return None
 
-
 def _zone_from_row(
     row: dict,
     *,
@@ -752,12 +800,20 @@ def _zone_from_row(
     zone_label: typing.Optional[str] = None,
     country_codes: typing.Optional[typing.List[str]] = None,
 ) -> typing.Optional[models.ServiceZone]:
-    """Build one ServiceZone from either raw CSV values or a Royal Mail template.
+    """Build one Royal Mail ServiceZone from a CSV row.
 
-    Royal Mail public online prices are weight-banded.  The service-level
-    ``min_weight``/``max_weight`` columns describe the package format limit;
-    the optional ``zone_min_weight``/``zone_max_weight`` columns describe the
-    actual price band for this ServiceZone.
+    For Royal Mail rate-sheet support, a ServiceZone is a priced weight band for
+    a geographic zone.
+
+    Required for rate-sheet zones:
+    - explicit rate
+    - min_weight
+    - max_weight
+
+    Blank zone_min_weight / zone_max_weight values are allowed in the CSV only
+    when the row has service-level min_weight / max_weight values. In that case
+    the service-level values are used as the zone band. This is useful for flat
+    domestic rows where one price applies to the whole package-format limit.
     """
     resolved_zone_id = zone_id if zone_id is not None else _row_value(row, "zone_id")
     resolved_zone_label = (
@@ -773,22 +829,54 @@ def _zone_from_row(
     postal_codes = _to_list(_row_value(row, "postal_codes"))
     cities = _to_list(_row_value(row, "cities"))
     transit_days = _to_int(_row_value(row, "zone_transit_days", "transit_days"))
-    rate = _to_float(_row_value(row, "rate"), 0.0)
+
+    # Important:
+    # A blank rate means "there is no static price for this row".
+    # Do not coerce blank rates to 0.0 because that creates misleading
+    # service_rates and can cause empty/"-" cells in the UI.
+    rate = _to_float(_row_value(row, "rate"), None)
+
+    if rate is None:
+        return None
+
     cost = _to_float(_row_value(row, "cost"))
 
     raw_weight_unit = _row_value(row, "weight_unit") or "KG"
     normalized_weight_unit = _normalize_weight_unit(raw_weight_unit)
 
+    # A ServiceZone must have a weight band.
+    #
+    # Prefer the explicit zone band columns. If they are blank, fall back to
+    # the service-level min/max weight columns. This fixes flat domestic rows
+    # where the row has one price for the entire letter/large-letter/parcel
+    # format.
+    raw_zone_min_weight = (
+        _row_value(row, "zone_min_weight", "zoneMinWeight")
+        or _row_value(row, "min_weight")
+    )
+    raw_zone_max_weight = (
+        _row_value(row, "zone_max_weight", "zoneMaxWeight")
+        or _row_value(row, "max_weight")
+    )
+
     zone_min_weight = _convert_weight_value(
-        _row_value(row, "zone_min_weight", "zoneMinWeight"),
+        raw_zone_min_weight,
         raw_weight_unit,
         normalized_weight_unit,
     )
     zone_max_weight = _convert_weight_value(
-        _row_value(row, "zone_max_weight", "zoneMaxWeight"),
+        raw_zone_max_weight,
         raw_weight_unit,
         normalized_weight_unit,
     )
+
+    zone_min_weight, zone_max_weight = _normalize_rate_table_weight_band(
+        zone_min_weight,
+        zone_max_weight,
+    )
+
+    if zone_min_weight is None or zone_max_weight is None:
+        return None
 
     has_zone_data = any(
         [
@@ -797,11 +885,6 @@ def _zone_from_row(
             resolved_country_codes,
             postal_codes,
             cities,
-            transit_days is not None,
-            zone_min_weight is not None,
-            zone_max_weight is not None,
-            rate is not None,
-            cost is not None,
         ]
     )
 
@@ -950,6 +1033,103 @@ CLICK_AND_DROP_FLEXIBLE_PACKAGE_FORMAT_SERVICE_CODES = frozenset(
     ]
 )
 
+def _zone_rate_table_group_key(zone: models.ServiceZone) -> typing.Tuple:
+    """Return the grouping key for weight bands belonging to the same zone."""
+    return (
+        zone.id,
+        zone.label,
+        tuple(sorted(zone.country_codes or [])),
+        tuple(sorted(zone.postal_codes or [])),
+        tuple(sorted(zone.cities or [])),
+    )
+
+
+def _normalize_service_zone_bands(
+    zones: typing.Iterable[models.ServiceZone],
+) -> typing.List[models.ServiceZone]:
+    """Normalize and de-overlap ServiceZone weight bands.
+
+    Karrio's rate-sheet editor expects multiple weight ranges for the same
+    ServiceZone to be represented as repeated service_rates with the same
+    service_id + zone_id and different min/max weights.
+
+    If Royal Mail source data uses "up to X" prices and we store max as X +
+    epsilon, the next band must begin at the previous max. Example:
+
+        0.001    - 0.100001
+        0.100001 - 0.250001
+
+    Not:
+
+        0.001 - 0.100001
+        0.1   - 0.250001
+
+    This helper:
+    - removes zones without a rate
+    - removes zones without complete weight bands
+    - clamps the first lower bound to 0.001
+    - rounds float output
+    - adjusts overlapping lower bounds to the previous max
+    """
+    grouped: typing.Dict[typing.Tuple, typing.List[models.ServiceZone]] = {}
+
+    for zone in zones or []:
+        if zone is None:
+            continue
+
+        if zone.rate is None:
+            continue
+
+        min_weight, max_weight = _normalize_rate_table_weight_band(
+            zone.min_weight,
+            zone.max_weight,
+        )
+
+        if min_weight is None or max_weight is None:
+            continue
+
+        zone.min_weight = min_weight
+        zone.max_weight = max_weight
+
+        grouped.setdefault(_zone_rate_table_group_key(zone), []).append(zone)
+
+    normalized_zones: typing.List[models.ServiceZone] = []
+
+    for _, group in grouped.items():
+        group = sorted(
+            group,
+            key=lambda item: (
+                item.min_weight,
+                item.max_weight,
+                item.rate if item.rate is not None else 0,
+            ),
+        )
+
+        previous_max_weight: typing.Optional[float] = None
+        seen_identities: typing.Set[typing.Tuple] = set()
+
+        for zone in group:
+            if previous_max_weight is not None and zone.min_weight < previous_max_weight:
+                zone.min_weight = previous_max_weight
+
+            zone.min_weight, zone.max_weight = _normalize_rate_table_weight_band(
+                zone.min_weight,
+                zone.max_weight,
+            )
+
+            if zone.min_weight is None or zone.max_weight is None:
+                continue
+
+            identity = _zone_identity(zone)
+
+            if identity in seen_identities:
+                continue
+
+            normalized_zones.append(zone)
+            seen_identities.add(identity)
+            previous_max_weight = zone.max_weight
+
+    return normalized_zones
 
 def _package_format_identifier_key(value: typing.Any) -> str:
     """Normalize a package format identifier for case/alias-insensitive lookup."""
@@ -1691,42 +1871,12 @@ def _service_metadata(row: dict) -> dict:
     }
 
 def _service_zone(row: dict) -> typing.Optional[models.ServiceZone]:
-    """Build an optional ServiceZone from a CSV row."""
-    zone_id = _row_value(row, "zone_id")
-    zone_label = _row_value(row, "zone_label")
-    country_codes = _to_list(_row_value(row, "country_codes"))
-    postal_codes = _to_list(_row_value(row, "postal_codes"))
-    cities = _to_list(_row_value(row, "cities"))
-    transit_days = _to_int(_row_value(row, "zone_transit_days", "transit_days"))
-    rate = _to_float(_row_value(row, "rate"), 0.0)
-    cost = _to_float(_row_value(row, "cost"))
+    """Build an optional ServiceZone from a CSV row.
 
-    has_zone_data = any(
-        [
-            zone_id,
-            zone_label,
-            country_codes,
-            postal_codes,
-            cities,
-            transit_days is not None,
-            rate is not None,
-            cost is not None,
-        ]
-    )
-
-    if not has_zone_data:
-        return None
-
-    return models.ServiceZone(
-        id=zone_id,
-        label=zone_label,
-        rate=rate,
-        cost=cost,
-        transit_days=transit_days,
-        country_codes=country_codes,
-        postal_codes=postal_codes,
-        cities=cities,
-    )
+    Royal Mail ServiceZone entries used by rate sheets must be priced and
+    weight-banded, so delegate to _zone_from_row().
+    """
+    return _zone_from_row(row)
 
 
 def load_services_from_csv(
@@ -1749,13 +1899,38 @@ def load_services_from_csv(
     - intl_generic -> Europe Zones 1/2/3 + World Zones 1/2/3
     - intl_europe  -> Europe Zones 1/2/3
     - intl_row     -> World Zones 1/2/3
+
+    Important for Karrio 2026.1.31+:
+    - Every ServiceLevel gets a stable id equal to service_code.
+    - Zones are attached directly to the service data.
+    - Multiple CSV rows with the same service_code are merged into one
+      ServiceLevel with multiple zone/rate bands.
     """
     if not csv_path.exists():
         return []
 
     services_by_code: typing.Dict[str, dict] = {}
 
-    with open(csv_path, newline="", encoding="utf-8") as csvfile:
+    def _append_unique(
+        target: typing.List[typing.Any],
+        values: typing.Iterable[typing.Any],
+        identity_fn: typing.Callable[[typing.Any], typing.Tuple],
+    ) -> None:
+        existing_identities = {
+            identity_fn(existing)
+            for existing in target
+        }
+
+        for value in values:
+            identity = identity_fn(value)
+
+            if identity in existing_identities:
+                continue
+
+            target.append(value)
+            existing_identities.add(identity)
+
+    with open(csv_path, newline="", encoding="utf-8-sig") as csvfile:
         reader = csv.DictReader(csvfile)
 
         for row in reader:
@@ -1787,7 +1962,8 @@ def load_services_from_csv(
             weight_unit = _normalize_weight_unit(raw_weight_unit)
             dimension_unit = _normalize_dimension_unit(raw_dimension_unit)
 
-            zones = _service_zones(row)
+            row_zones = _service_zones(row)
+            row_surcharges = _service_surcharges(row)
 
             normalized_dimensions = _normalize_dimension_limits(
                 _convert_dimension_value(
@@ -1809,6 +1985,11 @@ def load_services_from_csv(
 
             if service_code not in services_by_code:
                 services_by_code[service_code] = {
+                    # Critical for Karrio 2026.1.31+ rate-sheet references.
+                    # Without this, transform_to_shared_zones_format() uses
+                    # positional service IDs such as "0", "1", "2".
+                    "id": service_code,
+
                     "service_name": service_name,
                     "service_code": service_code,
                     "carrier_service_code": carrier_service_code,
@@ -1834,48 +2015,39 @@ def load_services_from_csv(
                     "max_length": normalized_dimensions[0],
                     "max_width": normalized_dimensions[1],
                     "max_height": normalized_dimensions[2],
+
                     "cost": _to_float(_row_value(row, "cost")),
                     "transit_days": _to_int(_row_value(row, "transit_days")),
                     "domicile": _to_bool(_row_value(row, "domicile")),
                     "international": _to_bool(_row_value(row, "international")),
                     "features": _service_features(row),
                     "metadata": _service_metadata(row),
-                    "surcharges": _service_surcharges(row),
-                    "zones": [],
+
+                    # Attach first-row zones and surcharges immediately.
+                    "zones": list(row_zones),
+                    "surcharges": list(row_surcharges),
                 }
 
-            service_surcharges = services_by_code[service_code].setdefault(
-                "surcharges",
-                [],
+                continue
+
+            service_data = services_by_code[service_code]
+
+            _append_unique(
+                service_data.setdefault("zones", []),
+                row_zones,
+                _zone_identity,
             )
-            existing_surcharge_identities = {
-                _surcharge_identity(existing_surcharge)
-                for existing_surcharge in service_surcharges
-            }
 
-            for surcharge in _service_surcharges(row):
-                identity = _surcharge_identity(surcharge)
+            _append_unique(
+                service_data.setdefault("surcharges", []),
+                row_surcharges,
+                _surcharge_identity,
+            )
 
-                if identity in existing_surcharge_identities:
-                    continue
-
-                service_surcharges.append(surcharge)
-                existing_surcharge_identities.add(identity)
-
-            service_zones = services_by_code[service_code]["zones"]
-            existing_zone_identities = {
-                _zone_identity(existing_zone)
-                for existing_zone in service_zones
-            }
-
-            for zone in zones:
-                identity = _zone_identity(zone)
-
-                if identity in existing_zone_identities:
-                    continue
-
-                service_zones.append(zone)
-                existing_zone_identities.add(identity)
+    for service_data in services_by_code.values():
+        service_data["zones"] = _normalize_service_zone_bands(
+            service_data.get("zones") or []
+        )
 
     return [
         models.ServiceLevel(**service_data)
@@ -2086,21 +2258,15 @@ class ReferenceRecord(dict):
     """
     Dict-like wrapper used for plugin metadata service_levels.
 
-    Why this exists:
-    - `/v1/references` needs JSON-serializable service metadata
-    - tests and metadata consumers still expect attribute access like
-      `service.service_code` and `service.features.tracked`
+    Karrio references must be JSON-serializable, but parts of the SDK/tests also
+    expect attribute access such as `service.service_code`.
 
-    This wrapper preserves both behaviors by:
-    - remaining a dict for JSON encoding
-    - exposing keys via attribute access
-    - recursively wrapping nested dict/list structures
+    This wrapper supports both behaviours.
     """
 
     __slots__ = ()
 
     def __getattr__(self, name):
-        """Lazily resolve enum aliases for backwards-compatible option access."""
         try:
             return self[name]
         except KeyError as e:
@@ -2108,7 +2274,6 @@ class ReferenceRecord(dict):
 
     @classmethod
     def wrap(cls, value):
-        """Return the nested enum wrapper used for legacy option aliases."""
         if isinstance(value, dict):
             return cls({key: cls.wrap(item) for key, item in value.items()})
 
@@ -2118,10 +2283,287 @@ class ReferenceRecord(dict):
         return value
 
 
+def _server_safe_reference_service_code(
+    value: typing.Any,
+) -> typing.Optional[str]:
+    """
+    Convert Royal Mail CSV service_code values into Karrio-server-safe codes.
+
+    Karrio 2026.1.31 validates rate-sheet ServiceLevel.service_code using:
+
+        ^[a-z0-9_]+$
+
+    Some Royal Mail service codes contain uppercase fragments, for example:
+
+        royal_mail_24_LargeLetter
+        royal_mail_24_Small_Parcel
+        royal_mail_24_Medium_Parcel
+
+    Those are fine for the provider's internal catalogue but not safe for the
+    rate-sheet database/API path.
+    """
+    if value in [None, ""]:
+        return None
+
+    text = str(value).strip()
+    text = re.sub(r"[^A-Za-z0-9_]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_").lower()
+
+    return text or None
+
+
+def _reference_service_name(
+    service: dict,
+    name_counts: typing.Dict[str, int],
+) -> str:
+    """
+    Make duplicate reference service names unique.
+
+    Karrio's create-rate-sheet flow maps temporary frontend service ids back to
+    saved database ServiceLevel ids using service_name. If two Royal Mail
+    services have the same service_name, rates can attach to the wrong saved
+    service and the UI will show dashes.
+
+    This only affects rate-table reference display names, not runtime rating.
+    """
+    service_name = service.get("service_name") or service.get("service_code") or ""
+
+    if name_counts.get(service_name, 0) <= 1:
+        return service_name
+
+    metadata = service.get("metadata") or {}
+
+    package_format = (
+        metadata.get("package_format_identifier")
+        or metadata.get("inferred_package_format_identifier")
+        or metadata.get("package_format_kind")
+    )
+
+    suffix = package_format or service.get("service_code") or service.get("id")
+
+    return f"{service_name} - {suffix}"
+
+def _reference_zone_has_rate(zone: typing.Any) -> bool:
+    """Return whether a reference zone carries an explicit static price."""
+    if isinstance(zone, dict):
+        rate = zone.get("rate")
+    else:
+        rate = getattr(zone, "rate", None)
+
+    if rate is None:
+        return False
+
+    if isinstance(rate, str) and rate.strip() == "":
+        return False
+
+    return True
+
+def _reference_zone_has_priced_weight_band(zone: typing.Any) -> bool:
+    """Return whether a reference zone is usable in a default rate sheet."""
+    if isinstance(zone, dict):
+        rate = zone.get("rate")
+        min_weight = zone.get("min_weight")
+        max_weight = zone.get("max_weight")
+    else:
+        rate = getattr(zone, "rate", None)
+        min_weight = getattr(zone, "min_weight", None)
+        max_weight = getattr(zone, "max_weight", None)
+
+    if rate is None or rate == "":
+        return False
+
+    min_weight, max_weight = _normalize_rate_table_weight_band(
+        min_weight,
+        max_weight,
+    )
+
+    return min_weight is not None and max_weight is not None
+
+
+def _reference_zone_group_key(zone: dict) -> typing.Tuple:
+    return (
+        zone.get("id"),
+        zone.get("label"),
+        tuple(sorted(zone.get("country_codes") or [])),
+        tuple(sorted(zone.get("postal_codes") or [])),
+        tuple(sorted(zone.get("cities") or [])),
+    )
+
+
+def _normalize_reference_zones(zones: typing.Iterable[dict]) -> typing.List[dict]:
+    """Normalize dict zones used by METADATA.service_levels references."""
+    grouped: typing.Dict[typing.Tuple, typing.List[dict]] = {}
+
+    for zone in zones or []:
+        if not _reference_zone_has_priced_weight_band(zone):
+            continue
+
+        normalized_zone = dict(zone)
+
+        min_weight, max_weight = _normalize_rate_table_weight_band(
+            normalized_zone.get("min_weight"),
+            normalized_zone.get("max_weight"),
+        )
+
+        if min_weight is None or max_weight is None:
+            continue
+
+        normalized_zone["min_weight"] = min_weight
+        normalized_zone["max_weight"] = max_weight
+
+        grouped.setdefault(
+            _reference_zone_group_key(normalized_zone),
+            [],
+        ).append(normalized_zone)
+
+    normalized_zones: typing.List[dict] = []
+
+    for _, group in grouped.items():
+        group = sorted(
+            group,
+            key=lambda item: (
+                item.get("min_weight"),
+                item.get("max_weight"),
+                item.get("rate") if item.get("rate") is not None else 0,
+            ),
+        )
+
+        previous_max_weight: typing.Optional[float] = None
+        seen: typing.Set[typing.Tuple] = set()
+
+        for zone in group:
+            if previous_max_weight is not None and zone["min_weight"] < previous_max_weight:
+                zone["min_weight"] = previous_max_weight
+
+            min_weight, max_weight = _normalize_rate_table_weight_band(
+                zone.get("min_weight"),
+                zone.get("max_weight"),
+            )
+
+            if min_weight is None or max_weight is None:
+                continue
+
+            zone["min_weight"] = min_weight
+            zone["max_weight"] = max_weight
+
+            identity = (
+                zone.get("id"),
+                zone.get("label"),
+                tuple(sorted(zone.get("country_codes") or [])),
+                tuple(sorted(zone.get("postal_codes") or [])),
+                tuple(sorted(zone.get("cities") or [])),
+                zone.get("min_weight"),
+                zone.get("max_weight"),
+                zone.get("rate"),
+                zone.get("cost"),
+                zone.get("transit_days"),
+            )
+
+            if identity in seen:
+                continue
+
+            normalized_zones.append(zone)
+            seen.add(identity)
+            previous_max_weight = zone["max_weight"]
+
+    return normalized_zones
+
+
+def _reference_service_level_dicts(
+    services: typing.Iterable[models.ServiceLevel],
+    *,
+    include_inactive: bool = False,
+    require_rate_data: bool = True,
+) -> typing.List[dict]:
+    """
+    Build service-level reference data for Karrio's default rate-sheet UI.
+
+    Karrio builds default rate sheets from:
+
+        METADATA.service_levels
+            -> references["ratesheets"][carrier]
+            -> transform_to_shared_zones_format(...)
+
+    Therefore Royal Mail references must only expose services with usable
+    priced weight bands. Otherwise the UI can create rows where no matching
+    service_rate exists and display "-".
+    """
+    service_dicts = lib.to_dict(list(services or []), clear_empty=False)
+
+    if not isinstance(service_dicts, list):
+        return []
+
+    normalized_services: typing.List[dict] = []
+
+    for service in service_dicts:
+        if not include_inactive and not is_active_flag(service.get("active"), default=True):
+            continue
+
+        service_code = service.get("service_code")
+
+        if service_code:
+            service["id"] = service.get("id") or service_code
+
+        if require_rate_data:
+            service["zones"] = _normalize_reference_zones(service.get("zones") or [])
+
+            if not service["zones"]:
+                continue
+
+        normalized_services.append(service)
+
+    # Make duplicate service names unique.
+    #
+    # Karrio's create-rate-sheet serializer maps temporary service IDs back to
+    # saved DB services using service_name. Duplicate names can break service
+    # rate remapping.
+    name_counts: typing.Dict[str, int] = {}
+
+    for service in normalized_services:
+        service_name = service.get("service_name") or service.get("service_code")
+
+        if service_name:
+            name_counts[service_name] = name_counts.get(service_name, 0) + 1
+
+    for service in normalized_services:
+        service_name = service.get("service_name")
+        service_code = service.get("service_code")
+
+        if not service_name or not service_code:
+            continue
+
+        if name_counts.get(service_name, 0) <= 1:
+            continue
+
+        metadata = service.get("metadata") or {}
+
+        package_format = (
+            metadata.get("package_format_identifier")
+            or metadata.get("inferred_package_format_identifier")
+            or metadata.get("package_format_kind")
+        )
+
+        suffix = package_format or service_code
+        service["service_name"] = f"{service_name} - {suffix}"
+
+    return normalized_services
+
+
 REFERENCE_SERVICE_LEVELS = ReferenceRecord.wrap(
-    lib.to_dict(ACTIVE_DEFAULT_SERVICES, clear_empty=False)
+    _reference_service_level_dicts(
+        DEFAULT_SERVICES,
+        include_inactive=False,
+        require_rate_data=True,
+    )
 )
 
+ACTIVE_REFERENCE_SERVICE_LEVELS = ReferenceRecord.wrap(
+    _reference_service_level_dicts(
+        ACTIVE_DEFAULT_SERVICES,
+        include_inactive=False,
+        require_rate_data=True,
+    )
+)
 
 def _service_selector_key(value: typing.Any) -> typing.Optional[str]:
     """Normalize a user-supplied service selector for lookup."""
