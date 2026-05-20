@@ -7,6 +7,7 @@ import karrio.core.models as models
 import karrio.lib as lib
 import karrio.providers.royalmail.units as provider_units
 import karrio.sdk as karrio
+from karrio.core.utils.transformer import transform_to_shared_zones_format
 
 import attr
 import karrio.mappers.royalmail.proxy as royalmail_proxy
@@ -586,6 +587,140 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
         ]
 
         self.assertEqual(returned_rates, [])
+
+    def test_reference_service_zones_are_priced_and_weight_banded(self):
+        """
+        Every Royal Mail ServiceZone exposed to default rate sheets must be a
+        priced weight band.
+        """
+        bad_zones = []
+
+        for service in provider_units.REFERENCE_SERVICE_LEVELS:
+            for zone in service.get("zones") or []:
+                rate = zone.get("rate")
+                min_weight = zone.get("min_weight")
+                max_weight = zone.get("max_weight")
+
+                if (
+                    rate in [None, ""]
+                    or min_weight in [None, ""]
+                    or max_weight in [None, ""]
+                    or float(min_weight) <= 0
+                    or float(max_weight) <= float(min_weight)
+                ):
+                    bad_zones.append(
+                        {
+                            "service_code": service.get("service_code"),
+                            "zone": zone,
+                        }
+                    )
+
+        self.assertEqual(bad_zones, [])
+
+    def test_reference_service_zone_weight_bands_do_not_overlap(self):
+        """
+        Bands for the same service + zone must not overlap.
+        """
+        overlaps = []
+
+        for service in provider_units.REFERENCE_SERVICE_LEVELS:
+            groups = {}
+
+            for zone in service.get("zones") or []:
+                key = (
+                    service.get("service_code"),
+                    zone.get("id"),
+                    zone.get("label"),
+                    tuple(sorted(zone.get("country_codes") or [])),
+                    tuple(sorted(zone.get("postal_codes") or [])),
+                    tuple(sorted(zone.get("cities") or [])),
+                )
+
+                groups.setdefault(key, []).append(zone)
+
+            for key, zones in groups.items():
+                zones = sorted(
+                    zones,
+                    key=lambda item: (
+                        float(item.get("min_weight")),
+                        float(item.get("max_weight")),
+                    ),
+                )
+
+                previous_zone = None
+
+                for zone in zones:
+                    if (
+                        previous_zone is not None
+                        and float(zone.get("min_weight")) < float(previous_zone.get("max_weight"))
+                    ):
+                        overlaps.append(
+                            {
+                                "key": key,
+                                "previous": previous_zone,
+                                "current": zone,
+                            }
+                        )
+
+                    previous_zone = zone
+
+        self.assertEqual(overlaps, [])
+
+    def test_default_rate_table_reference_populates_service_rates(self):
+        """
+        Regression test for the rate-sheet UI showing '-' in cells.
+        """
+        rate_sheet = transform_to_shared_zones_format(
+            provider_units.REFERENCE_SERVICE_LEVELS
+        )
+
+        services = rate_sheet["services"]
+        zones = rate_sheet["zones"]
+        service_rates = rate_sheet["service_rates"]
+
+        service = next(
+            item
+            for item in services
+            if item["service_code"] == "royal_mail_international_economy_small_parcel"
+        )
+
+        europe_zone_1 = next(
+            zone
+            for zone in zones
+            if zone["label"] == "Europe Zone 1"
+        )
+
+        matching_rates = [
+            rate
+            for rate in service_rates
+            if rate["service_id"] == service["id"]
+            and rate["zone_id"] == europe_zone_1["id"]
+            and rate["min_weight"] == 0.001
+            and rate["max_weight"] == 0.100001
+        ]
+
+        self.assertEqual(len(matching_rates), 1)
+        self.assertEqual(matching_rates[0]["rate"], 14.70)
+
+    def test_default_rate_table_reference_does_not_emit_blank_rate_rows(self):
+        """
+        Default rate-sheet references must not emit blank/null service_rates.
+        """
+        rate_sheet = transform_to_shared_zones_format(
+            provider_units.REFERENCE_SERVICE_LEVELS
+        )
+
+        bad_rates = [
+            rate
+            for rate in rate_sheet["service_rates"]
+            if rate.get("rate") in [None, ""]
+            or rate.get("min_weight") in [None, ""]
+            or rate.get("max_weight") in [None, ""]
+            or float(rate.get("min_weight")) <= 0
+            or float(rate.get("max_weight")) <= float(rate.get("min_weight"))
+        ]
+
+        self.assertEqual(bad_rates, [])
 
 if __name__ == "__main__":
     unittest.main()
