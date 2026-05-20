@@ -342,14 +342,39 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
                 )
 
     def test_plugin_metadata_exposes_csv_service_levels(self):
-        """Expose the same CSV-backed service catalog through plugin metadata."""
-        csv_rows_by_code = self._csv_rows_by_service_code()
+        """
+        Expose the active CSV-backed service catalog through plugin metadata.
+
+        Karrio uses plugin.METADATA.service_levels to build carrier references
+        and default rate-table rows. Therefore inactive CSV rows must not be
+        exposed here, otherwise they appear in the Karrio rate table UI.
+        """
+        all_csv_rows_by_code = self._csv_rows_by_service_code()
+        active_csv_rows_by_code = {
+            service_code: row
+            for service_code, row in all_csv_rows_by_code.items()
+            if provider_units.service_is_active(row)
+        }
+        inactive_csv_codes = {
+            service_code
+            for service_code, row in all_csv_rows_by_code.items()
+            if not provider_units.service_is_active(row)
+        }
+
         plugin_services_by_code = self._plugin_service_levels_by_code()
 
         self.assertEqual(plugin.METADATA.id, "royalmail")
-        self.assertEqual(set(plugin_services_by_code), set(csv_rows_by_code))
+        self.assertEqual(set(plugin_services_by_code), set(active_csv_rows_by_code))
 
-        for service_code, row in csv_rows_by_code.items():
+        self.assertFalse(
+            set(plugin_services_by_code) & inactive_csv_codes,
+            msg=(
+                "Inactive CSV services leaked into plugin metadata: "
+                f"{set(plugin_services_by_code) & inactive_csv_codes}"
+            ),
+        )
+
+        for service_code, row in active_csv_rows_by_code.items():
             with self.subTest(service_code=service_code):
                 service = plugin_services_by_code[service_code]
 
@@ -643,14 +668,37 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         )
 
     def test_return_service_detection_uses_csv_features(self):
-        """Identify return services based on CSV feature metadata."""
-        return_rows = [row for row in self._csv_rows() if self._is_return_row(row)]
-        outbound_rows = [row for row in self._csv_rows() if not self._is_return_row(row)]
+        """
+        Identify active return services based on CSV feature metadata.
 
-        self.assertGreater(len(return_rows), 0)
-        self.assertGreater(len(outbound_rows), 0)
+        Inactive CSV services are intentionally excluded from runtime service
+        resolution. Therefore inactive return services such as insured return
+        variants should not be expected to resolve through
+        provider_units.is_return_service().
+        """
+        rows = self._csv_rows()
 
-        for row in return_rows[:5]:
+        active_return_rows = [
+            row
+            for row in rows
+            if provider_units.service_is_active(row) and self._is_return_row(row)
+        ]
+        active_outbound_rows = [
+            row
+            for row in rows
+            if provider_units.service_is_active(row) and not self._is_return_row(row)
+        ]
+        inactive_return_rows = [
+            row
+            for row in rows
+            if not provider_units.service_is_active(row) and self._is_return_row(row)
+        ]
+
+        self.assertGreater(len(active_return_rows), 0)
+        self.assertGreater(len(active_outbound_rows), 0)
+        self.assertGreater(len(inactive_return_rows), 0)
+
+        for row in active_return_rows[:5]:
             selectors = [
                 row["service_code"],
                 row["carrier_service_code"],
@@ -659,10 +707,13 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             ]
 
             for selector in selectors:
+                if selector in [None, ""]:
+                    continue
+
                 with self.subTest(selector=selector):
                     self.assertTrue(provider_units.is_return_service(selector))
 
-        for row in outbound_rows[:5]:
+        for row in active_outbound_rows[:5]:
             selectors = [
                 row["service_code"],
                 row["carrier_service_code"],
@@ -671,8 +722,31 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             ]
 
             for selector in selectors:
+                if selector in [None, ""]:
+                    continue
+
                 with self.subTest(selector=selector):
                     self.assertFalse(provider_units.is_return_service(selector))
+
+        for row in inactive_return_rows[:5]:
+            selectors = [
+                row["service_code"],
+                row["service_name"],
+                self._friendly_service_name(row["service_name"]),
+            ]
+
+            for selector in selectors:
+                if selector in [None, ""]:
+                    continue
+
+                with self.subTest(selector=selector):
+                    self.assertFalse(
+                        provider_units.is_return_service(selector),
+                        msg=(
+                            "Inactive return services should not resolve as "
+                            f"runtime return services: {selector}"
+                        ),
+                    )
 
     # -------------------------------------------------------------------------
     # Non-service-catalog behaviour tests

@@ -23,16 +23,20 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
         return {
             service.service_code: service
             for service in provider_units.DEFAULT_SERVICES
-            if service.active is not False
+            if provider_units.service_is_active(service)
         }
 
     def _first_domestic_service_with_rate(self):
+        
         for service in provider_units.DEFAULT_SERVICES:
             if service.active is False:
                 continue
 
             if service.domicile is not True:
                 continue
+
+            if not provider_units.service_is_active(service):
+                continue            
 
             for zone in service.zones or []:
                 if zone.rate is None:
@@ -504,6 +508,84 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
                 for message in messages
             )
         )
+
+    def test_default_rate_table_reference_excludes_inactive_csv_services(self):
+        """
+        Karrio references['ratesheets'] is built from METADATA.service_levels.
+
+        Therefore REFERENCE_SERVICE_LEVELS must not include inactive services,
+        otherwise the rate table UI will show active=False rows from services.csv.
+        """
+        inactive_codes = {
+            service.service_code
+            for service in provider_units.DEFAULT_SERVICES
+            if not provider_units.service_is_active(service)
+        }
+
+        reference_codes = {
+            service["service_code"]
+            for service in provider_units.REFERENCE_SERVICE_LEVELS
+        }
+
+        self.assertTrue(
+            inactive_codes,
+            msg="Test requires at least one inactive service in services.csv",
+        )
+        self.assertFalse(
+            inactive_codes & reference_codes,
+            msg=f"Inactive services leaked into rate-table references: {inactive_codes & reference_codes}",
+        )
+
+    def test_shipping_service_enum_excludes_inactive_csv_services(self):
+        inactive_codes = {
+            service.service_code
+            for service in provider_units.DEFAULT_SERVICES
+            if not provider_units.service_is_active(service)
+        }
+
+        enum_codes = set(provider_units.ShippingService.__members__.keys())
+
+        self.assertFalse(
+            inactive_codes & enum_codes,
+            msg=f"Inactive services leaked into ShippingService enum: {inactive_codes & enum_codes}",
+        )
+
+    def test_inactive_exact_service_selector_resolves_to_no_rate_services(self):
+        inactive_service = next(
+            service
+            for service in provider_units.DEFAULT_SERVICES
+            if not provider_units.service_is_active(service)
+        )
+
+        self.assertEqual(
+            provider_units.resolve_rate_service_codes(inactive_service.service_code),
+            [],
+        )
+
+    def test_string_false_active_service_is_not_rated(self):
+        """
+        Defensive regression test for server/rate-table paths where active may
+        arrive as the string 'False'. Python would otherwise treat it as truthy.
+        """
+        service, _ = self._first_domestic_service_with_rate()
+        disabled_service = attr.evolve(service, active="False")
+
+        settings = attr.evolve(
+            fixture.gateway.settings,
+            services=[disabled_service],
+        )
+
+        response = royalmail_proxy.Proxy(settings=settings).get_rates(
+            lib.Serializable(self.RateRequest)
+        ).deserialize()
+
+        returned_rates = [
+            rate
+            for _, package_result in response
+            for rate in package_result[0]
+        ]
+
+        self.assertEqual(returned_rates, [])
 
 if __name__ == "__main__":
     unittest.main()
