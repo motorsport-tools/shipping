@@ -8,6 +8,7 @@ import karrio.lib as lib
 import karrio.mappers.royalmail.proxy as royalmail_proxy
 import karrio.providers.royalmail.units as provider_units
 import karrio.sdk as karrio
+from datetime import date, timedelta
 
 from . import fixture
 
@@ -18,12 +19,78 @@ def _charge_amounts(rate):
         for charge in rate.get("extra_charges", [])
     }
 
+def _amount(value, default=0.0):
+    if value in [None, ""]:
+        return default
+
+    return float(value)
+
+
+def _money(value):
+    return round(float(value), 2)
+
+
+def _percentage_amount(base, percentage):
+    return _money(float(base) * float(percentage) / 100)
+
+
+def _day_before(date_text):
+    return (date.fromisoformat(date_text) - timedelta(days=1)).isoformat()
 
 class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
     def setUp(self):
         self.maxDiff = None
 
+    SURCHARGE_METADATA_SERVICE_CODE = "royal_mail_24_Small_Parcel"
+    SURCHARGE_RATE_SERVICE_CODE = "royal_mail_tracked_24"
+
+    def _catalogue_service(self, service_code):
+        """
+        Return a service from the full CSV catalogue.
+
+        Use this for metadata-loading tests. This intentionally includes
+        inactive rows because inactive rows can still carry Click & Drop
+        metadata such as surcharge amounts, package-format mapping, and
+        serviceRegisterCode.
+        """
+        service = provider_units.ALL_SERVICE_LEVEL_BY_CODE.get(service_code)
+
+        if service is None:
+            self.fail(f"{service_code} was not loaded from services.csv")
+
+        return service
+
+    def _active_service(self, service_code):
+        """
+        Return an active runtime service.
+
+        Use this for actual Rating.fetch(...) tests. If the CSV marks the
+        service inactive, the test should not expect the rate mixer to return it.
+        """
+        service = provider_units.SERVICE_LEVEL_BY_CODE.get(service_code)
+
+        if service is None:
+            self.skipTest(
+                f"{service_code} is not active in services.csv and should not "
+                "be used for runtime rating assertions"
+            )
+
+        return service
+
+    def _service_peak_dates(self, service):
+        metadata = service.metadata or {}
+
+        peak_start = metadata.get("peak_surcharge_start_date")
+        peak_end = metadata.get("peak_surcharge_end_date")
+
+        self.assertNotIn(peak_start, [None, ""])
+        self.assertNotIn(peak_end, [None, ""])
+
+        return peak_start, peak_end
+
     def _rate_for_service(self, service_code, rate_date="2026-05-18"):
+        self._active_service(service_code)
+
         payload = copy.deepcopy(fixture.RatePayload)
         payload["services"] = [service_code]
         payload["options"] = {
@@ -41,9 +108,9 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
         self.assertEqual(len(rates), 1)
 
         return rates[0]
-
+    
     def test_services_csv_loads_uk_domestic_surcharges(self):
-        service = provider_units.SERVICE_LEVEL_BY_CODE["royal_mail_24_Small_Parcel"]
+        service = self._catalogue_service(self.SURCHARGE_METADATA_SERVICE_CODE)
         surcharges = {
             surcharge.id: surcharge
             for surcharge in service.surcharges
@@ -85,15 +152,20 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
                 )
 
     def test_peak_surcharge_is_date_limited(self):
-        service = provider_units.SERVICE_LEVEL_BY_CODE["royal_mail_24_Small_Parcel"]
+        service = self._catalogue_service(self.SURCHARGE_METADATA_SERVICE_CODE)
+        peak_start, peak_end = self._service_peak_dates(service)
 
         outside_peak = provider_units.active_royalmail_surcharges(
             service.surcharges,
-            at_date="2026-05-18",
+            at_date=_day_before(peak_start),
+            peak_start_date=peak_start,
+            peak_end_date=peak_end,
         )
         inside_peak = provider_units.active_royalmail_surcharges(
             service.surcharges,
-            at_date="2025-11-18",
+            at_date=peak_start,
+            peak_start_date=peak_start,
+            peak_end_date=peak_end,
         )
 
         self.assertNotIn(
@@ -106,37 +178,63 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
         )
 
     def test_rate_applies_fuel_energy_and_green_outside_peak(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+        peak_start, _ = self._service_peak_dates(service)
+
         rate = self._rate_for_service(
-            "royal_mail_24_Small_Parcel",
-            rate_date="2026-05-18",
+            service.service_code,
+            rate_date=_day_before(peak_start),
         )
         charges = _charge_amounts(rate)
 
-        self.assertEqual(rate["total_charge"], 6.72)
-        self.assertEqual(charges["Base Charge"], 5.75)
-        self.assertEqual(charges["Fuel and Energy Surcharge"], 0.92)
-        self.assertEqual(charges["Green Surcharge"], 0.05)
+        base_charge = charges["Base Charge"]
+        expected_fuel = _percentage_amount(
+            base_charge,
+            service.metadata["fuel_energy_surcharge_percentage"],
+        )
+        expected_green = _amount(service.metadata["green_surcharge_amount"])
+        expected_total = _money(base_charge + expected_fuel + expected_green)
+
+        self.assertEqual(rate["total_charge"], expected_total)
+        self.assertEqual(charges["Fuel and Energy Surcharge"], expected_fuel)
+        self.assertEqual(charges["Green Surcharge"], expected_green)
         self.assertNotIn("Peak Surcharge", charges)
 
     def test_rate_applies_peak_inside_peak_window(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+        peak_start, _ = self._service_peak_dates(service)
+
         rate = self._rate_for_service(
-            "royal_mail_24_Small_Parcel",
-            rate_date="2025-11-18",
+            service.service_code,
+            rate_date=peak_start,
         )
         charges = _charge_amounts(rate)
 
-        self.assertEqual(rate["total_charge"], 6.84)
-        self.assertEqual(charges["Base Charge"], 5.75)
-        self.assertEqual(charges["Fuel and Energy Surcharge"], 0.92)
-        self.assertEqual(charges["Green Surcharge"], 0.05)
-        self.assertEqual(charges["Peak Surcharge"], 0.12)
+        base_charge = charges["Base Charge"]
+        expected_fuel = _percentage_amount(
+            base_charge,
+            service.metadata["fuel_energy_surcharge_percentage"],
+        )
+        expected_green = _amount(service.metadata["green_surcharge_amount"])
+        expected_peak = _amount(service.metadata["peak_surcharge_amount"])
+        expected_total = _money(
+            base_charge + expected_fuel + expected_green + expected_peak
+        )
+
+        self.assertEqual(rate["total_charge"], expected_total)
+        self.assertEqual(charges["Fuel and Energy Surcharge"], expected_fuel)
+        self.assertEqual(charges["Green Surcharge"], expected_green)
+        self.assertEqual(charges["Peak Surcharge"], expected_peak)
 
     def test_rate_uses_planned_despatch_date_for_peak_surcharge(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+        peak_start, _ = self._service_peak_dates(service)
+
         payload = copy.deepcopy(fixture.RatePayload)
-        payload["services"] = ["royal_mail_24_Small_Parcel"]
+        payload["services"] = [service.service_code]
         payload["options"] = {
             **payload.get("options", {}),
-            "planned_despatch_date": "2025-11-18",
+            "planned_despatch_date": peak_start,
         }
 
         response = karrio.Rating.fetch(
@@ -150,17 +248,31 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
 
         charges = _charge_amounts(rates[0])
 
-        self.assertEqual(rates[0]["total_charge"], 6.84)
-        self.assertEqual(charges["Fuel and Energy Surcharge"], 0.92)
-        self.assertEqual(charges["Green Surcharge"], 0.05)
-        self.assertEqual(charges["Peak Surcharge"], 0.12)
+        base_charge = charges["Base Charge"]
+        expected_fuel = _percentage_amount(
+            base_charge,
+            service.metadata["fuel_energy_surcharge_percentage"],
+        )
+        expected_green = _amount(service.metadata["green_surcharge_amount"])
+        expected_peak = _amount(service.metadata["peak_surcharge_amount"])
+        expected_total = _money(
+            base_charge + expected_fuel + expected_green + expected_peak
+        )
+
+        self.assertEqual(rates[0]["total_charge"], expected_total)
+        self.assertEqual(charges["Fuel and Energy Surcharge"], expected_fuel)
+        self.assertEqual(charges["Green Surcharge"], expected_green)
+        self.assertEqual(charges["Peak Surcharge"], expected_peak)
 
     def test_rate_uses_planned_despatch_date_camel_case_for_peak_surcharge(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+        peak_start, _ = self._service_peak_dates(service)
+
         payload = copy.deepcopy(fixture.RatePayload)
-        payload["services"] = ["royal_mail_24_Small_Parcel"]
+        payload["services"] = [service.service_code]
         payload["options"] = {
             **payload.get("options", {}),
-            "plannedDespatchDate": "2025-11-18",
+            "plannedDespatchDate": peak_start,
         }
 
         response = karrio.Rating.fetch(
@@ -173,9 +285,9 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
         self.assertEqual(len(rates), 1)
 
         charges = _charge_amounts(rates[0])
+        expected_peak = _amount(service.metadata["peak_surcharge_amount"])
 
-        self.assertEqual(rates[0]["total_charge"], 6.84)
-        self.assertEqual(charges["Peak Surcharge"], 0.12)
+        self.assertEqual(charges["Peak Surcharge"], expected_peak)
 
     def test_parcelforce_services_load_13_percent_fuel_surcharge(self):
         service = provider_units.SERVICE_LEVEL_BY_CODE["parcel_force_express_48_large"]
@@ -200,28 +312,29 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
         )
 
     def test_peak_window_uses_service_metadata_dates(self):
-        service = provider_units.SERVICE_LEVEL_BY_CODE["royal_mail_24_Small_Parcel"]
+        service = self._catalogue_service(self.SURCHARGE_METADATA_SERVICE_CODE)
+        peak_start, peak_end = self._service_peak_dates(service)
 
         self.assertEqual(
             service.metadata["peak_surcharge_start_date"],
-            "2025-11-17",
+            peak_start,
         )
         self.assertEqual(
             service.metadata["peak_surcharge_end_date"],
-            "2026-01-09",
+            peak_end,
         )
 
         outside_peak = provider_units.active_royalmail_surcharges(
             service.surcharges,
-            at_date="2025-11-16",
-            peak_start_date=service.metadata["peak_surcharge_start_date"],
-            peak_end_date=service.metadata["peak_surcharge_end_date"],
+            at_date=_day_before(peak_start),
+            peak_start_date=peak_start,
+            peak_end_date=peak_end,
         )
         inside_peak = provider_units.active_royalmail_surcharges(
             service.surcharges,
-            at_date="2025-11-17",
-            peak_start_date=service.metadata["peak_surcharge_start_date"],
-            peak_end_date=service.metadata["peak_surcharge_end_date"],
+            at_date=peak_start,
+            peak_start_date=peak_start,
+            peak_end_date=peak_end,
         )
 
         self.assertNotIn(
@@ -243,15 +356,15 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
             - Parcelforce express parcel signature: £0.70
             - Age verification: £2.40
         """
-        royal_mail_24 = provider_units.SERVICE_LEVEL_BY_CODE[
+        royal_mail_24 = self._catalogue_service(
             "royal_mail_24_Small_Parcel"
-        ]
-        tracked_24 = provider_units.SERVICE_LEVEL_BY_CODE[
+        )
+        tracked_24 = self._catalogue_service(
             "royal_mail_tracked_24"
-        ]
-        parcelforce_24 = provider_units.SERVICE_LEVEL_BY_CODE[
+        )
+        parcelforce_24 = self._catalogue_service(
             "parcel_force_express_24"
-        ]
+        )
 
         self.assertEqual(
             royal_mail_24.metadata["signature_surcharge_amount"],

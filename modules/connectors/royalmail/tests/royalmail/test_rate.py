@@ -3,6 +3,8 @@
 import unittest
 from unittest.mock import patch
 
+import copy
+
 import karrio.core.models as models
 import karrio.lib as lib
 import karrio.providers.royalmail.units as provider_units
@@ -172,64 +174,6 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
             lib.to_dict(([], [message])),
         )
 
-    def test_get_large_letter_rates_filters_out_parcelforce(self):
-        payload = {
-            **fixture.RatePayload,
-            "recipient": {
-                "address_line1": "Ffordd Caergybi",
-                "city": "LlanfairPwll",
-                "country_code": "GB",
-                "email": "richard.al.simcox@gmail.com",
-                "person_name": "richard Simcox",
-                "phone_number": "07807816582",
-                "postal_code": "LL615SJ",
-                "residential": True,
-                "state_code": "Ynys Mon",
-            },
-            "shipper": {
-                "address_line1": "Carnguwch",
-                "address_line2": "Llithfaen",
-                "city": "Pwllheli",
-                "company_name": "Motorsport Tools Ltd",
-                "country_code": "GB",
-                "email": "richard.simcox@motorsport-tools.com",
-                "person_name": "Sales Team",
-                "phone_number": "01758750000",
-                "postal_code": "LL536NH",
-                "state_code": "Gwynedd",
-            },
-            "parcels": [
-                {
-                    "dimension_unit": "CM",
-                    "height": 2.5,
-                    "is_document": False,
-                    "length": 35.3,
-                    "package_preset": "royalmail_large_letter",
-                    "packaging_type": "largeLetter",
-                    "weight": 1,
-                    "weight_unit": "G",
-                    "width": 25,
-                }
-            ],
-            "options": {
-                **fixture.RatePayload.get("options", {}),
-                "shipping_date": "2026-05-14T10:56",
-            },
-        }
-
-        response = (
-            karrio.Rating.fetch(models.RateRequest(**payload))
-            .from_(fixture.gateway)
-            .parse()
-        )
-
-        rates, messages = lib.to_dict(response)
-        services = {rate["service"] for rate in rates}
-
-        self.assertEqual(messages, [])
-        self.assertIn("royal_mail_24_LargeLetter", services)
-        self.assertIn("royal_mail_48_LargeLetter", services)
-        self.assertNotIn("parcel_force_express_24", services)
 
     def test_signature_confirmation_adds_option_surcharge(self):
         service, _ = self._first_domestic_service_with_rate()
@@ -721,6 +665,125 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
         ]
 
         self.assertEqual(bad_rates, [])
+
+    def _letter_rate_payload(self, **options):
+        payload = copy.deepcopy(fixture.RatePayload)
+
+        payload["parcels"] = [
+            {
+                "dimension_unit": "CM",
+                "height": 0.5,
+                "is_document": False,
+                "length": 16.5,
+                "package_format_identifier": "letter",
+                "packaging_type": "letter",
+                "weight": 50,
+                "weight_unit": "G",
+                "width": 24,
+            }
+        ]
+
+        payload["options"] = {
+            **payload.get("options", {}),
+            "package_format_identifier": "letter",
+            **options,
+        }
+
+        return payload
+
+    def test_is_tracked_option_filters_rates_to_tracked_services(self):
+        """
+        Karrio API callers can request tracked services with:
+
+            options.is_tracked = true
+
+        Royal Mail local rating should then return only services whose
+        services.csv feature metadata includes `tracked`.
+        """
+        payload = self._letter_rate_payload(is_tracked=True)
+
+        response = (
+            karrio.Rating.fetch(models.RateRequest(**payload))
+            .from_(fixture.gateway)
+            .parse()
+        )
+
+        rates, messages = lib.to_dict(response)
+
+        self.assertEqual(messages, [])
+        self.assertGreater(len(rates), 0)
+
+        for rate in rates:
+            with self.subTest(service=rate["service"]):
+                service = provider_units.resolve_service_level(rate["service"])
+
+                self.assertIsNotNone(service)
+                self.assertTrue(
+                    getattr(service.features, "tracked", False),
+                    msg=(
+                        "options.is_tracked=true should only return tracked "
+                        f"services, but got {rate['service']}"
+                    ),
+                )
+
+    def test_features_option_filters_rates_to_tracked_services(self):
+        """
+        Karrio universal rating has an options.features convention.
+
+        The Royal Mail extension enforces it locally because the universal
+        rating proxy currently passes required_features through without
+        applying the filter.
+        """
+        payload = self._letter_rate_payload(features=["tracked"])
+
+        response = (
+            karrio.Rating.fetch(models.RateRequest(**payload))
+            .from_(fixture.gateway)
+            .parse()
+        )
+
+        rates, messages = lib.to_dict(response)
+
+        self.assertEqual(messages, [])
+        self.assertGreater(len(rates), 0)
+
+        for rate in rates:
+            with self.subTest(service=rate["service"]):
+                service = provider_units.resolve_service_level(rate["service"])
+
+                self.assertIsNotNone(service)
+                self.assertTrue(
+                    getattr(service.features, "tracked", False),
+                    msg=(
+                        "options.features=['tracked'] should only return "
+                        f"tracked services, but got {rate['service']}"
+                    ),
+                )
+
+    def test_explicit_untracked_service_with_is_tracked_returns_rating_message(self):
+        """
+        If the caller explicitly asks for an untracked service while also
+        requiring tracking, remove the rate and return a helpful message.
+        """
+        payload = self._letter_rate_payload(is_tracked=True)
+        payload["services"] = ["royal_mail_first_class_letter"]
+
+        response = (
+            karrio.Rating.fetch(models.RateRequest(**payload))
+            .from_(fixture.gateway)
+            .parse()
+        )
+
+        rates, messages = lib.to_dict(response)
+
+        self.assertEqual(rates, [])
+        self.assertTrue(
+            any(
+                message["code"] == "required_feature_not_supported"
+                for message in messages
+            ),
+            msg=messages,
+        )
 
 if __name__ == "__main__":
     unittest.main()

@@ -300,6 +300,25 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
 
         raise AssertionError("No CSV service row matched the requested predicate")
 
+    def _first_active_unique_selector_row(self, predicate=lambda row: True):
+        """
+        Return the first active CSV row with unique service selectors.
+
+        Normal runtime selector tests should use this helper because
+        `resolve_service_code()` and `resolve_carrier_service()` are expected
+        to behave like active-service resolvers. Inactive rows can still be used
+        by metadata-specific resolvers such as `resolve_service_register_code()`
+        or return-shipment helpers, but they should not be treated as normal
+        runtime service-name selectors.
+        """
+        for row in self._rows_with_unique_selectors():
+            if provider_units.service_is_active(row) and predicate(row):
+                return row
+
+        raise AssertionError(
+            "No active CSV service row matched the requested predicate"
+        )
+
     # -------------------------------------------------------------------------
     # Request helpers
     # -------------------------------------------------------------------------
@@ -541,11 +560,17 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_resolve_service_code_uses_csv_selectors(self):
-        """Resolve CSV service codes, carrier codes, full names, and friendly names."""
-        normal_row = self._first_unique_selector_row(
+        """
+        Resolve active CSV service codes, carrier codes, full names, and
+        friendly names to canonical Karrio service codes.
+
+        Inactive CSV rows are intentionally excluded from runtime service-code
+        resolution.
+        """
+        normal_row = self._first_active_unique_selector_row(
             lambda row: not self._is_return_row(row)
         )
-        return_row = self._first_unique_selector_row(self._is_return_row)
+        return_row = self._first_active_unique_selector_row(self._is_return_row)
 
         for row in [normal_row, return_row]:
             selectors = [
@@ -556,6 +581,9 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             ]
 
             for selector in selectors:
+                if selector in [None, ""]:
+                    continue
+
                 with self.subTest(selector=selector, expected=row["service_code"]):
                     self.assertEqual(
                         provider_units.resolve_service_code(selector),
@@ -565,11 +593,17 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertIsNone(provider_units.resolve_service_code("not_a_service"))
 
     def test_resolve_carrier_service_uses_csv_selectors(self):
-        """Resolve CSV selectors to the Royal Mail API serviceCode."""
-        normal_row = self._first_unique_selector_row(
+        """
+        Resolve active CSV selectors to the Royal Mail API serviceCode.
+
+        Inactive CSV rows may still be used for Click & Drop metadata lookups,
+        raw carrier-code passthrough, or return-shipment resolution, but they
+        should not be treated as normal runtime service-name selectors.
+        """
+        normal_row = self._first_active_unique_selector_row(
             lambda row: not self._is_return_row(row)
         )
-        return_row = self._first_unique_selector_row(self._is_return_row)
+        return_row = self._first_active_unique_selector_row(self._is_return_row)
 
         for row in [normal_row, return_row]:
             selectors = [
@@ -580,7 +614,13 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             ]
 
             for selector in selectors:
-                with self.subTest(selector=selector, expected=row["carrier_service_code"]):
+                if selector in [None, ""]:
+                    continue
+
+                with self.subTest(
+                    selector=selector,
+                    expected=row["carrier_service_code"],
+                ):
                     self.assertEqual(
                         provider_units.resolve_carrier_service(selector),
                         row["carrier_service_code"],
@@ -589,12 +629,23 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertIsNone(provider_units.resolve_carrier_service("not_a_service"))
 
     def test_resolve_service_register_code_uses_csv_selectors(self):
-        """Resolve serviceRegisterCode from CSV-backed selectors."""
-        normal_row = self._first_unique_selector_row(
-            lambda row: not self._is_return_row(row) and row.get("service_register_code")
+        """
+        Resolve serviceRegisterCode from active CSV-backed selectors.
+
+        Package-format-specific raw carrier-code lookups are tested separately
+        because they intentionally use the full CSV metadata catalogue.
+        """
+        normal_row = self._first_active_unique_selector_row(
+            lambda row: (
+                not self._is_return_row(row)
+                and row.get("service_register_code")
+            )
         )
-        return_row = self._first_unique_selector_row(
-            lambda row: self._is_return_row(row) and row.get("service_register_code")
+        return_row = self._first_active_unique_selector_row(
+            lambda row: (
+                self._is_return_row(row)
+                and row.get("service_register_code")
+            )
         )
 
         for row in [normal_row, return_row]:
@@ -606,7 +657,13 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
             ]
 
             for selector in selectors:
-                with self.subTest(selector=selector, expected=row["service_register_code"]):
+                if selector in [None, ""]:
+                    continue
+
+                with self.subTest(
+                    selector=selector,
+                    expected=row["service_register_code"],
+                ):
                     self.assertEqual(
                         provider_units.resolve_service_register_code(selector),
                         row["service_register_code"],
@@ -615,6 +672,46 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertIsNone(
             provider_units.resolve_service_register_code("not_a_service")
         )
+
+    def test_resolve_return_carrier_service_allows_inactive_return_selectors(self):
+        """
+        Return shipment creation may need return services that are inactive for
+        rating/reference purposes. Those should resolve through
+        resolve_return_carrier_service(), not through normal runtime service
+        detection.
+        """
+        row = self._first_unique_selector_row(
+            lambda row: (
+                self._is_return_row(row)
+                and not provider_units.service_is_active(row)
+            )
+        )
+
+        selectors = [
+            row["service_code"],
+            row["carrier_service_code"],
+            row["service_name"],
+            self._friendly_service_name(row["service_name"]),
+        ]
+
+        for selector in selectors:
+            if selector in [None, ""]:
+                continue
+
+            with self.subTest(selector=selector):
+                self.assertEqual(
+                    provider_units.resolve_return_carrier_service(selector),
+                    row["carrier_service_code"],
+                )
+
+                self.assertFalse(
+                    provider_units.is_return_service(selector),
+                    msg=(
+                        "Inactive return services should resolve for the "
+                        "return-shipment API resolver but not as active "
+                        "runtime return services."
+                    ),
+                )
 
     def test_resolve_service_register_code_handles_duplicate_carrier_codes_by_package_format(self):
         """Resolve serviceRegisterCode for CSV services sharing the same carrier serviceCode."""
