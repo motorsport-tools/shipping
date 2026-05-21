@@ -3104,6 +3104,87 @@ def service_supports_package_format(
     # Keep generic services available for parcel-like shipments.
     return requested_kind == "parcel"
 
+def normalize_carrier_specific_options(
+    options: dict,
+    configured_option_names: typing.Optional[typing.Iterable[str]] = None,
+    carrier_names: typing.Optional[typing.Iterable[str]] = None,
+) -> dict:
+    """
+    Normalize Royal Mail options submitted by different Karrio UI/API paths.
+
+    Supported input shapes:
+
+        {
+            "include_returns_label": true
+        }
+
+        {
+            "royalmail": {
+                "include_returns_label": true
+            }
+        }
+
+        {
+            "royalmail": {
+                "includeReturnsLabel": true
+            }
+        }
+
+    Some Karrio CE UI screens submit carrier-specific options as array indexes
+    under the carrier key, based on config.shipping_options, e.g.
+
+        {
+            "royalmail": {
+                "0": true
+            }
+        }
+
+    If configured_option_names=["include_returns_label"], this helper maps
+    "0" back to "include_returns_label".
+    """
+    raw_options = dict(options or {})
+
+    aliases = {
+        "royalmail",
+        "royal_mail",
+        "royal-mail",
+        "royalmail_click_and_drop",
+        "royalmail_clickanddrop",
+        "click_and_drop",
+    }
+
+    for carrier_name in carrier_names or []:
+        if carrier_name not in [None, ""]:
+            aliases.add(str(carrier_name))
+
+    configured_names = shipping_option_names_initializer(
+        configured_option_names or []
+    )
+
+    flattened = {}
+
+    for key, value in raw_options.items():
+        if key in aliases and isinstance(value, dict):
+            for nested_key, nested_value in value.items():
+                resolved_key = None
+
+                if str(nested_key).isdigit():
+                    index = int(str(nested_key))
+
+                    if 0 <= index < len(configured_names):
+                        resolved_key = configured_names[index]
+                else:
+                    resolved_key = normalize_shipping_option_name(nested_key)
+
+                if resolved_key:
+                    flattened[resolved_key] = nested_value
+
+            continue
+
+        flattened[key] = value
+
+    return flattened
+
 def resolve_carrier_service(service: typing.Optional[str]) -> typing.Optional[str]:
     """
     Resolve a supported selector to the Royal Mail API `serviceCode`.

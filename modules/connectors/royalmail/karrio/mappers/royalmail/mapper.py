@@ -316,6 +316,19 @@ class Mapper(mapper.Mapper):
     def create_rate_request(self, payload: models.RateRequest) -> lib.Serializable:
         """Build a Royal Mail rating request from a Karrio RateRequest payload."""
         request_data = lib.to_dict(payload)
+
+        request_data["options"] = provider_units.normalize_carrier_specific_options(
+            request_data.get("options") or {},
+            configured_option_names=(
+                self.settings.connection_config.shipping_options.state or []
+            ),
+            carrier_names=[
+                self.settings.carrier_id,
+                self.settings.carrier_name,
+                self.settings.shipping_carrier_name,
+            ],
+        )
+
         requested_services = request_data.get("services") or []
 
         if isinstance(requested_services, str):

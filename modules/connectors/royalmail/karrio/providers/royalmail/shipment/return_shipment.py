@@ -302,7 +302,18 @@ def return_shipment_request(
     shipper = lib.to_address(payload.shipper)
     return_address = lib.to_address(payload.return_address or payload.recipient)
 
-    raw_options = payload.options or {}
+    raw_options = provider_units.normalize_carrier_specific_options(
+        payload.options or {},
+        configured_option_names=(
+            settings.connection_config.shipping_options.state or []
+        ),
+        carrier_names=[
+            settings.carrier_id,
+            settings.carrier_name,
+            settings.shipping_carrier_name,
+        ],
+    )
+
     _validate_allowed_shipping_options(raw_options, settings)
 
     options = lib.to_shipping_options(

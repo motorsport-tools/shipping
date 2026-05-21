@@ -1914,11 +1914,22 @@ def shipment_request(
     shipper = lib.to_address(payload.shipper)
     recipient = lib.to_address(payload.recipient)
     packages = lib.to_packages(payload.parcels, required=["weight"])
-    options = lib.to_shipping_options(
+    raw_options = provider_units.normalize_carrier_specific_options(
         payload.options or {},
+        configured_option_names=(
+            settings.connection_config.shipping_options.state or []
+        ),
+        carrier_names=[
+            settings.carrier_id,
+            settings.carrier_name,
+            settings.shipping_carrier_name,
+        ],
+    )
+
+    options = lib.to_shipping_options(
+        raw_options,
         initializer=provider_units.shipping_options_initializer,
     )
-    raw_options = payload.options or {}
     raw_parcels = list(payload.parcels or [])
 
     _validate_allowed_shipping_options(raw_options, settings)

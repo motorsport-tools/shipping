@@ -11,6 +11,48 @@ import karrio.providers.royalmail.utils as provider_utils
 ALLOWED_DOCUMENT_TYPES = {"postageLabel", "despatchNote", "CN22", "CN23"}
 
 
+def _to_bool(value, default=None):
+    """Convert common bool/string values without treating 'false' as truthy."""
+    if value in [None, ""]:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+
+        if normalized in ["true", "1", "yes", "y", "on"]:
+            return True
+
+        if normalized in ["false", "0", "no", "n", "off"]:
+            return False
+
+    return bool(value)
+
+
+def _payload_value(payload, *names):
+    """Return the first present value from top-level payload/options/meta."""
+    sources = [
+        payload,
+        provider_utils.get_value(payload, "options"),
+        provider_utils.get_value(payload, "meta"),
+        provider_utils.get_value(payload, "metadata"),
+    ]
+
+    for source in sources:
+        if source is None:
+            continue
+
+        for name in names:
+            value = provider_utils.get_value(source, name)
+
+            if value is not None:
+                return value
+
+    return None
+
+
 def label_request(payload, settings: provider_utils.Settings) -> lib.Serializable:
     """Build a Click & Drop label retrieval request."""
     reference = (
@@ -39,12 +81,12 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
     if not resolved_order_identifiers:
         raise ValueError(
             "Royal Mail Click & Drop label requests require "
-            "`order_identifiers`, `orderIdentifiers`, `shipment_identifier`, `shipmentIdentifier`, or `reference`"
+            "`order_identifiers`, `orderIdentifiers`, `shipment_identifier`, "
+            "`shipmentIdentifier`, or `reference`"
         )
 
     document_type = (
-        provider_utils.get_value(payload, "document_type")
-        or provider_utils.get_value(payload, "documentType")
+        _payload_value(payload, "document_type", "documentType")
         or "postageLabel"
     )
 
@@ -54,19 +96,28 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
             "`postageLabel`, `despatchNote`, `CN22`, or `CN23`"
         )
 
-    include_returns_label = (
-        provider_utils.get_value(payload, "include_returns_label")
-        if provider_utils.get_value(payload, "include_returns_label") is not None
-        else provider_utils.get_value(payload, "includeReturnsLabel")
+    include_returns_label = _payload_value(
+        payload,
+        "include_returns_label",
+        "includeReturnsLabel",
     )
-    include_cn = (
-        provider_utils.get_value(payload, "include_cn")
-        if provider_utils.get_value(payload, "include_cn") is not None
-        else provider_utils.get_value(payload, "includeCN")
+    include_cn = _payload_value(
+        payload,
+        "include_cn",
+        "includeCN",
     )
 
-    if document_type == "postageLabel" and include_returns_label is None:
-        include_returns_label = False
+    if document_type == "postageLabel":
+        if include_returns_label is None:
+            include_returns_label = _to_bool(
+                settings.connection_config.include_return_label_in_response.state,
+                default=False,
+            )
+
+        include_returns_label = _to_bool(include_returns_label, default=False)
+
+        if include_cn is not None:
+            include_cn = _to_bool(include_cn, default=None)
 
     request = {
         "orderIdentifiers": resolved_order_identifiers,
