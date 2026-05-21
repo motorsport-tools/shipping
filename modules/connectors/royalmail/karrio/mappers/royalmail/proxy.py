@@ -1375,23 +1375,22 @@ def _settings_for_universal_rating(
         -> add GBP 2.00 Signature on delivery to the local rate.
 
     Important:
-    Do not use `settings.services or DEFAULT_SERVICES`.
-
-    If `settings.services` is an explicit empty list after active filtering, we
-    must preserve that empty list. Otherwise inactive rows such as
-    active="False" can be filtered out, then accidentally replaced by the full
-    default Royal Mail rate table.
+    Use settings.shipping_services instead of settings.services so local rating
+    respects connection-level `config.shipping_services` whitelists while still
+    preserving the explicit-empty-services case.
     """
     surcharge_date = _rate_request_surcharge_date(rate_request)
     options = _request_value(rate_request, "options", {}) or {}
 
-    raw_services = (
-        settings.services
-        if settings.services is not None
-        else provider_units.DEFAULT_SERVICES
-    )
+    runtime_services = getattr(settings, "shipping_services", None)
 
-    active_services = provider_units.active_service_levels(raw_services)
+    if runtime_services is None:
+        raw_services = (
+            settings.services
+            if settings.services is not None
+            else provider_units.DEFAULT_SERVICES
+        )
+        runtime_services = provider_units.active_service_levels(raw_services)
 
     return attr.evolve(
         settings,
@@ -1403,7 +1402,7 @@ def _settings_for_universal_rating(
                     options=options,
                 )
             )
-            for service in active_services
+            for service in list(runtime_services or [])
         ],
     )
 
