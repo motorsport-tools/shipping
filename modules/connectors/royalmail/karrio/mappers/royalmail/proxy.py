@@ -772,6 +772,36 @@ def _request_value(obj: typing.Any, name: str, default=None):
     return getattr(obj, name, default)
 
 
+def _object_value(obj: typing.Any, *names: str):
+    """Read the first available value from a dict, attrs/model object, or state wrapper."""
+    if obj is None:
+        return None
+
+    if isinstance(obj, dict):
+        normalized = (
+            provider_units.normalize_option_keys(obj)
+            if all(isinstance(key, str) for key in obj.keys())
+            else obj
+        )
+
+        for name in names:
+            if isinstance(normalized, dict) and name in normalized:
+                return normalized[name]
+
+            if name in obj:
+                return obj[name]
+
+        return None
+
+    for name in names:
+        value = getattr(obj, name, None)
+
+        if value is not None:
+            return _state_value(value)
+
+    return None
+
+
 def _option_value(options: typing.Any, *names: str) -> typing.Any:
     """Read the first available option value by name."""
     if options is None:
@@ -795,84 +825,81 @@ def _option_value(options: typing.Any, *names: str) -> typing.Any:
         if value is not None:
             return _state_value(value)
 
+    content = getattr(options, "content", None)
+
+    if isinstance(content, dict):
+        return _option_value(content, *names)
+
     return None
 
-ROYALMAIL_OPTION_SURCHARGE_DEFINITIONS = [
-    {
-        "id": provider_units.ROYALMAIL_SIGNATURE_SURCHARGE_ID,
-        "name": "Signature on delivery",
-        "option_names": (
-            "request_signature_upon_delivery",
-            "signature_confirmation",
-        ),
-        "metadata_keys": (
-            "signature_surcharge_amount",
-            "signature_addon_amount",
-            "signature_price",
-        ),
-    },
-    {
-        "id": provider_units.ROYALMAIL_AGE_VERIFICATION_SURCHARGE_ID,
-        "name": "Age verification",
-        "option_names": (
-            "royalmail_age_verification",
-            "age_verification",
-        ),
-        "metadata_keys": (
-            "age_verification_surcharge_amount",
-            "age_verification_addon_amount",
-            "age_verification_price",
-        ),
-    },
-    {
-        "id": provider_units.ROYALMAIL_ID_VERIFICATION_SURCHARGE_ID,
-        "name": "ID verification",
-        "option_names": (
-            "royalmail_id_verification",
-            "id_verification",
-        ),
-        "metadata_keys": (
-            "id_verification_surcharge_amount",
-            "id_verification_addon_amount",
-            "id_verification_price",
-        ),
-    },
-]
 
+def _normalized_option_lookup_names(*names: str) -> typing.Set[str]:
+    """Return raw and Royal-Mail-normalized option keys for presence checks."""
+    lookup_names: typing.Set[str] = set()
 
-def _option_enabled(options: typing.Any, *names: str) -> bool:
-    """Return whether one of the given option names is explicitly enabled."""
-    value = _option_value(options, *names)
-
-    if value is None:
-        return False
-
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, str):
-        return value.strip().lower() in ["1", "true", "yes", "y", "on"]
-
-    return bool(value)
-
-
-def _metadata_amount(
-    metadata: dict,
-    *keys: str,
-) -> typing.Optional[float]:
-    """Read a positive/zero money amount from service metadata."""
-    for key in keys:
-        value = metadata.get(key)
-
-        if value in [None, ""]:
+    for name in names:
+        if name in [None, ""]:
             continue
+
+        lookup_names.add(name)
 
         try:
-            return float(value)
-        except (TypeError, ValueError):
-            continue
+            normalized = provider_units.normalize_option_keys({name: True})
+        except Exception:
+            normalized = {}
 
-    return None
+        lookup_names.update(str(key) for key in normalized.keys())
+
+    return lookup_names
+
+
+def _option_has_explicit_key(options: typing.Any, *names: str) -> bool:
+    """
+    Return whether an option key was explicitly provided.
+
+    This is intentionally stricter than `_option_value()` because Karrio
+    ShippingOptions-style wrappers can expose default states. Rating duty
+    filtering must not treat default `False` values as explicit DAP/DDP routing.
+    """
+    if options is None:
+        return False
+
+    lookup_names = _normalized_option_lookup_names(*names)
+
+    if isinstance(options, dict):
+        normalized = provider_units.normalize_option_keys(options)
+
+        return any(
+            name in options or name in normalized
+            for name in lookup_names
+        )
+
+    content = getattr(options, "content", None)
+
+    if isinstance(content, dict):
+        return _option_has_explicit_key(content, *names)
+
+    # Fallback for simple custom objects that do not expose `.content`.
+    return any(getattr(options, name, None) is not None for name in names)
+
+
+def _explicit_option_value(options: typing.Any, *names: str) -> typing.Any:
+    """Return an option value only when the caller explicitly supplied the key."""
+    if not _option_has_explicit_key(options, *names):
+        return None
+
+    if isinstance(options, dict):
+        return _option_value(options, *names)
+
+    content = getattr(options, "content", None)
+
+    if isinstance(content, dict):
+        value = _option_value(content, *names)
+
+        if value not in [None, ""]:
+            return value
+
+    return _option_value(options, *names)
 
 
 ROYALMAIL_OPTION_SURCHARGE_DEFINITIONS = [
@@ -936,7 +963,7 @@ ROYALMAIL_OPTION_SURCHARGE_DEFINITIONS = [
 
 
 def _option_enabled(options: typing.Any, *names: str) -> bool:
-    """Return whether one of the given option names is explicitly enabled."""
+    """Return whether one of the given option names is enabled."""
     value = _option_value(options, *names)
 
     if value is None:
@@ -1657,6 +1684,163 @@ def _rate_request_insurance_amount(
         declared_value=declared_value,
     )
 
+def _rate_request_duty_filter(
+    rate_request: typing.Any,
+    requested_features: typing.Optional[typing.Iterable[str]] = None,
+) -> typing.Optional[bool]:
+    """
+    Resolve whether rating should filter by DDP/DTP/DAP/DDU duty routing.
+
+    Returns:
+        True:
+            Only Royal Mail DDP/DTP-capable services should be returned.
+
+        False:
+            Only non-DDP/non-DTP services should be returned.
+
+        None:
+            Do not apply a duty-routing service filter.
+
+    Rating policy:
+        - Explicit rate options/features can force DDP/DTP or DAP/DDU.
+        - Customs-level DAP/DDU is treated as a non-duty-paid routing signal.
+        - Customs-level DTP is treated as duty-paid because it is a product-
+          specific Royal Mail duty-paid service signal.
+        - Customs-level DDP alone does not force DDP rates. This preserves
+          backwards-compatible rating behaviour where customs metadata can be
+          present before the merchant has chosen a DDP product.
+        - Customs-level DDP plus meaningful sender-paid duty data does force
+          DDP rates.
+    """
+    options = _request_value(rate_request, "options", {}) or {}
+    customs = _request_value(rate_request, "customs", None)
+
+    normalized_features = {
+        feature
+        for feature in (
+            _normalize_rate_feature_name(feature)
+            for feature in requested_features or []
+        )
+        if feature
+    }
+
+    # Explicit feature selectors win first.
+    if "duty_unpaid" in normalized_features:
+        return False
+
+    if "ddp" in normalized_features:
+        return True
+
+    option_incoterm = provider_units.normalize_customs_incoterm(
+        _explicit_option_value(
+            options,
+            "incoterm",
+            "incoterms",
+            "terms_of_trade",
+            "termsOfTrade",
+            "delivery_terms",
+            "deliveryTerms",
+            "duty_terms",
+            "dutyTerms",
+        )
+    )
+
+    # options.incoterm is an explicit rate option, so it is allowed to filter.
+    if option_incoterm in provider_units.DUTY_UNPAID_INCOTERMS:
+        return False
+
+    if option_incoterm in provider_units.DUTY_PAID_INCOTERMS:
+        return True
+
+    explicit_duty_paid = _explicit_option_value(
+        options,
+        "duty_paid",
+        "dutyPaid",
+        "delivery_duty_paid",
+        "deliveryDutyPaid",
+        "ddp",
+        "dtp",
+    )
+
+    if explicit_duty_paid not in [None, ""]:
+        return True if _truthy_option_value(explicit_duty_paid) else False
+
+    explicit_duty_unpaid = _explicit_option_value(
+        options,
+        "duty_unpaid",
+        "dutyUnpaid",
+        "delivery_duty_unpaid",
+        "deliveryDutyUnpaid",
+        "dap",
+        "ddu",
+    )
+
+    if explicit_duty_unpaid not in [None, ""]:
+        return False if _truthy_option_value(explicit_duty_unpaid) else None
+
+    customs_incoterm = provider_units.normalize_customs_incoterm(
+        _object_value(
+            customs,
+            "incoterm",
+            "incoterms",
+            "terms_of_trade",
+            "termsOfTrade",
+        )
+    )
+
+    # Customs-level DAP/DDU is an explicit recipient-pays signal.
+    if customs_incoterm in provider_units.DUTY_UNPAID_INCOTERMS:
+        return False
+
+    # Royal Mail DTP is product-specific enough to treat as duty-paid even when
+    # supplied at customs level.
+    if customs_incoterm == "DTP":
+        return True
+
+    duty = _object_value(customs, "duty")
+
+    duty_paid_by = provider_units.normalize_duty_paid_by(
+        _object_value(
+            duty,
+            "paid_by",
+            "paidBy",
+            "payer",
+        )
+    )
+
+    if duty_paid_by in provider_units.DUTY_UNPAID_BY_VALUES:
+        return False
+
+    if duty_paid_by in provider_units.DUTY_PAID_BY_VALUES:
+        has_meaningful_duty_data = any(
+            _object_value(duty, *names) not in [None, ""]
+            for names in [
+                ("declared_value", "declaredValue", "amount", "value"),
+                ("account_number", "accountNumber"),
+                ("currency",),
+                ("id",),
+            ]
+        )
+
+        if has_meaningful_duty_data:
+            return True
+
+    explicit_customs_duty_costs = _explicit_option_value(
+        options,
+        "customs_duty_costs",
+        "customsDutyCosts",
+    )
+
+    if explicit_customs_duty_costs not in [None, ""]:
+        return True
+
+    # Important:
+    # Do not call provider_units.is_duty_paid_requested() here as a fallback.
+    # That function is shipment-creation oriented and intentionally treats
+    # customs.incoterm = DDP as duty-paid. Rating has a softer policy where
+    # customs DDP alone does not force DDP services.
+    return None
+
 _RATE_FEATURE_ALIASES = {
     # Tracking
     "is_tracked": "tracked",
@@ -1726,6 +1910,32 @@ _RATE_FEATURE_ALIASES = {
     # Express
     "express": "express",
     "priority": "express",
+
+    # Duty paid / DDP / DTP
+    "ddp": "ddp",
+    "dtp": "ddp",
+    "duty_paid": "ddp",
+    "dutypaid": "ddp",
+    "duties_paid": "ddp",
+    "dutiespaid": "ddp",
+    "delivery_duty_paid": "ddp",
+    "deliverydutypaid": "ddp",
+    "taxes_paid": "ddp",
+    "taxespaid": "ddp",
+    "duty_tax_paid": "ddp",
+    "dutytaxpaid": "ddp",
+    "duties_taxes_paid": "ddp",
+    "dutiestaxespaid": "ddp",
+
+    # Duty unpaid / DAP / DDU
+    "dap": "duty_unpaid",
+    "ddu": "duty_unpaid",
+    "duty_unpaid": "duty_unpaid",
+    "dutyunpaid": "duty_unpaid",
+    "duties_unpaid": "duty_unpaid",
+    "dutiesunpaid": "duty_unpaid",
+    "delivery_duty_unpaid": "duty_unpaid",
+    "deliverydutyunpaid": "duty_unpaid",
 }
 
 
@@ -2026,7 +2236,6 @@ def _service_has_option_surcharge_metadata(
         definition,
     ) is not None
 
-
 def _service_supports_rate_feature(
     service: models.ServiceLevel,
     feature: str,
@@ -2039,6 +2248,8 @@ def _service_supports_rate_feature(
     - `features.signature = true` means the base service is signed.
     - A blank/false `features.signature` service may still support
       `signature_confirmation` through Royal Mail's optional signature surcharge.
+    - DDP/DTP and DAP/DDU are duty-routing filters, not normal carrier
+      features. They are handled through provider_units.service_supports_ddp().
     """
     if service is None or feature in [None, ""]:
         return True
@@ -2056,6 +2267,12 @@ def _service_supports_rate_feature(
     # Raw CSV feature tokens are the source of truth when present.
     if feature in feature_codes:
         return True
+
+    if feature == "ddp":
+        return provider_units.service_supports_ddp(service)
+
+    if feature == "duty_unpaid":
+        return not provider_units.service_supports_ddp(service)
 
     if feature == "tracked":
         return _service_feature_value(service, "tracked") is True
@@ -2119,6 +2336,36 @@ def _service_supports_rate_feature(
 
     return False
 
+_RATE_DUTY_FILTER_FEATURES = {
+    "ddp",
+    "duty_unpaid",
+}
+
+
+def _normalized_rate_features(
+    features: typing.Iterable[str],
+) -> typing.List[str]:
+    """Normalize requested rate feature selectors."""
+    return [
+        feature
+        for feature in (
+            _normalize_rate_feature_name(feature)
+            for feature in features or []
+        )
+        if feature
+    ]
+
+
+def _non_duty_rate_features(
+    features: typing.Iterable[str],
+) -> typing.List[str]:
+    """Return required features excluding DDP/DAP duty-routing pseudo-features."""
+    return [
+        feature
+        for feature in _normalized_rate_features(features)
+        if feature not in _RATE_DUTY_FILTER_FEATURES
+    ]
+
 
 def _rate_supports_required_features(
     rate: models.RateDetails,
@@ -2126,15 +2373,14 @@ def _rate_supports_required_features(
     settings: provider_settings.Settings,
     options: typing.Any,
 ) -> bool:
-    """Return whether a rated service satisfies all requested features."""
-    required_features = [
-        feature
-        for feature in (
-            _normalize_rate_feature_name(feature)
-            for feature in required_features or []
-        )
-        if feature
-    ]
+    """
+    Return whether a rated service satisfies non-duty requested features.
+
+    DDP/DTP/DAP/DDU are duty-routing filters, not normal carrier features.
+    They are handled by `_rate_request_duty_filter()` and the DDP filtering
+    stage so that callers get the correct duty-specific message codes.
+    """
+    required_features = _non_duty_rate_features(required_features)
 
     if not required_features:
         return True
@@ -2158,19 +2404,8 @@ def _rate_supports_required_features(
 def _required_features_text(
     required_features: typing.Iterable[str],
 ) -> str:
-    """Human-readable feature list for rating messages."""
-    return ", ".join(
-        sorted(
-            {
-                feature
-                for feature in (
-                    _normalize_rate_feature_name(feature)
-                    for feature in required_features or []
-                )
-                if feature
-            }
-        )
-    )
+    """Human-readable non-duty feature list for rating messages."""
+    return ", ".join(sorted(set(_non_duty_rate_features(required_features))))
 
 def _with_royalmail_compensation_rate_meta(
     rate: models.RateDetails,
@@ -2227,21 +2462,26 @@ def _filter_package_rates_by_package_format(
     1. Royal Mail package format.
     2. Karrio insurance coverage.
     3. Requested service features/capabilities.
+    4. Explicit DDP/DAP/DTP duty-routing compatibility.
 
-    Feature examples:
-        options.is_tracked = true
-        options.features = ["tracked"]
-        options.signature_confirmation = true
-        options.dangerous_good = true
+    Rating duty-routing rules:
+    - If the caller explicitly requests DDP/DTP, only return DDP/DTP-capable services.
+    - If the caller explicitly requests DAP/DDU, remove DDP/DTP-only services.
+    - If no explicit duty-routing rate filter is requested, do not filter by
+      customs.incoterm alone.
 
-    This is intentionally done in the Royal Mail extension because Karrio's
-    universal RatingMixinProxy currently passes `required_features` through but
-    does not enforce it inside get_available_rates().
+    This avoids dropping normal OTA International Tracked rates when the
+    shipment-level customs data contains `incoterm = DDP`.
     """
     package_formats = _rate_request_package_formats(rate_request)
     requested_services = _requested_rate_services(rate_request)
     requested_insurance = _rate_request_insurance_amount(rate_request)
     requested_features = _rate_request_required_features(rate_request)
+    non_duty_requested_features = _non_duty_rate_features(requested_features)
+    duty_filter = _rate_request_duty_filter(
+        rate_request,
+        requested_features=requested_features,
+    )
     request_options = _request_value(rate_request, "options", {}) or {}
 
     filtered_response = []
@@ -2286,15 +2526,19 @@ def _filter_package_rates_by_package_format(
             )
         ]
 
+        if duty_filter is None:
+            ddp_filtered_rates = feature_filtered_rates
+        else:
+            ddp_filtered_rates = [
+                rate
+                for rate in feature_filtered_rates
+                if provider_units.service_supports_ddp(rate.service) == duty_filter
+            ]
+
         filtered_rates = [
             _with_royalmail_compensation_rate_meta(rate)
-            for rate in feature_filtered_rates
+            for rate in ddp_filtered_rates
         ]
-
-        filtered_service_codes = {
-            rate.service
-            for rate in filtered_rates
-        }
 
         package_filtered_service_codes = {
             rate.service
@@ -2304,6 +2548,16 @@ def _filter_package_rates_by_package_format(
         insurance_filtered_service_codes = {
             rate.service
             for rate in insurance_filtered_rates
+        }
+
+        feature_filtered_service_codes = {
+            rate.service
+            for rate in feature_filtered_rates
+        }
+
+        ddp_filtered_service_codes = {
+            rate.service
+            for rate in ddp_filtered_rates
         }
 
         removed_package_requested_services = [
@@ -2363,10 +2617,10 @@ def _filter_package_rates_by_package_format(
             rate.service
             for rate in insurance_filtered_rates
             if rate.service in requested_services
-            and rate.service not in filtered_service_codes
+            and rate.service not in feature_filtered_service_codes
         ]
 
-        if any(requested_features) and any(removed_feature_requested_services):
+        if any(non_duty_requested_features) and any(removed_feature_requested_services):
             messages.append(
                 models.Message(
                     carrier_id=settings.carrier_id,
@@ -2379,16 +2633,62 @@ def _filter_package_rates_by_package_format(
                         f"{', '.join(removed_feature_requested_services)}"
                     ),
                     details={
-                        "required_features": list(requested_features),
+                        "required_features": list(non_duty_requested_features),
                         "operation": "rating",
                     },
                 )
             )
 
+        removed_ddp_requested_services = [
+            rate.service
+            for rate in feature_filtered_rates
+            if duty_filter is not None
+            and rate.service in requested_services
+            and rate.service not in ddp_filtered_service_codes
+        ]
+
+        if duty_filter is not None and any(removed_ddp_requested_services):
+            if duty_filter is True:
+                messages.append(
+                    models.Message(
+                        carrier_id=settings.carrier_id,
+                        carrier_name=settings.carrier_name,
+                        code="ddp_service_required",
+                        message=(
+                            "Duty-paid/DDP/DTP shipments require a Royal Mail "
+                            "DDP/DTP-capable service. The requested service is "
+                            "not DDP/DTP-capable: "
+                            f"{', '.join(removed_ddp_requested_services)}"
+                        ),
+                        details={
+                            "duty_paid": True,
+                            "operation": "rating",
+                        },
+                    )
+                )
+            else:
+                messages.append(
+                    models.Message(
+                        carrier_id=settings.carrier_id,
+                        carrier_name=settings.carrier_name,
+                        code="ddp_service_requires_duty_paid",
+                        message=(
+                            "Royal Mail DDP/DTP services can only be used when "
+                            "duty-paid/DDP/DTP customs handling is requested. "
+                            "The requested DDP/DTP service was removed because "
+                            "duty-paid handling was not requested: "
+                            f"{', '.join(removed_ddp_requested_services)}"
+                        ),
+                        details={
+                            "duty_paid": False,
+                            "operation": "rating",
+                        },
+                    )
+                )
+
         filtered_response.append((reference, (filtered_rates, messages)))
 
     return filtered_response
-
 
 
 class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):

@@ -372,6 +372,41 @@ def _validate_selected_service_package_formats(
             f"{', '.join(str(value) for value in incompatible_formats)}."
         )
 
+def _validate_selected_service_ddp_compatibility(
+    selected_service: typing.Optional[str],
+    duty_paid_requested: bool,
+):
+    """
+    Enforce Royal Mail DDP/DTP service compatibility.
+
+    Royal Mail Click & Drop supports `customsDutyCosts` only on DDP-capable
+    services. Royal Mail / Parcelforce DTP products are treated as duty-paid
+    products for the same filtering purpose.
+
+    Rules:
+    - DDP/DTP requests require a DDP/DTP-capable service.
+    - DDP/DTP services require explicit duty-paid intent.
+    """
+    if selected_service in [None, ""]:
+        return
+
+    service_is_duty_paid = provider_units.service_supports_ddp(selected_service)
+
+    if duty_paid_requested and not service_is_duty_paid:
+        raise ValueError(
+            "Royal Mail Click & Drop duty-paid DDP/DTP shipments require a "
+            "DDP/DTP-capable Royal Mail service. The selected service "
+            f"`{selected_service}` does not support DDP/DTP."
+        )
+
+    if service_is_duty_paid and not duty_paid_requested:
+        raise ValueError(
+            "Royal Mail Click & Drop DDP/DTP services can only be used when "
+            "duty-paid customs handling is requested. Set "
+            "`customs.incoterm` to `DDP` or `DTP`, provide meaningful "
+            "`customs.duty` details, or set `options.duty_paid` to `true`."
+        )
+
 def _validate_multi_package_rules(package_formats: typing.List[str], package_count: int):
     """
     Royal Mail Click & Drop rule:
@@ -2006,6 +2041,16 @@ def shipment_request(
             f"Invalid Royal Mail Click & Drop service selector: {selected_service}"
         )
 
+    duty_paid_requested = provider_units.is_duty_paid_requested(
+        customs=customs,
+        options=raw_options,
+    )
+
+    _validate_selected_service_ddp_compatibility(
+        selected_service,
+        duty_paid_requested,
+    )
+
     derived_service_register_code = provider_units.resolve_service_register_code(
         selected_service,
         package_format=shipment_package_kind,
@@ -2061,14 +2106,15 @@ def shipment_request(
     order_tax = _coalesce(options.order_tax.state, 0.0)
     customs_duty = _coalesce(
         options.customs_duty_costs.state,
-        provider_utils.get_value(getattr(customs, "duty", None), "declared_value"),
+        provider_units.customs_duty_amount(
+            customs=customs,
+            options=raw_options,
+        ),
     )
-
-    customs_incoterm = str(getattr(customs, "incoterm", "") or "").upper()
 
     customs_duty_to_serialize = (
         customs_duty
-        if customs is not None and customs_incoterm == "DDP"
+        if duty_paid_requested
         else None
     )
 

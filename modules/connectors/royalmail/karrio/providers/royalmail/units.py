@@ -2256,6 +2256,86 @@ def _service_register_by_carrier_and_format_index(
 
     return index
 
+def _service_register_by_carrier_index(
+    services: typing.Iterable[models.ServiceLevel],
+) -> dict[str, str]:
+    """
+    Index serviceRegisterCode values by carrier service code only when the
+    carrier code is genuinely package-format independent.
+
+    Important:
+    This fallback is intentionally narrower than
+    _service_register_by_carrier_and_format_index(...).
+
+    Some Royal Mail Click & Drop catalogue rows have a fixed register code and
+    no package-format kind. Example:
+
+        MPR -> 01
+
+    Those rows can safely be resolved by carrier code alone because there is no
+    letter/largeLetter/parcel distinction in the row metadata.
+
+    But many rows have a blank package_format_identifier while still having an
+    inferred package_format_kind from dimensions/weight. Example:
+
+        royal_mail_first_class_letter / BPL1
+        serviceRegisterCode = 01
+        package_format_identifier = blank
+        package_format_kind = letter
+
+    A blank API packageFormatIdentifier does not mean the service is flexible.
+    Therefore package-specific rows must not be included in this carrier-level
+    fallback, otherwise BPL1 would incorrectly resolve for smallParcel.
+    """
+    grouped: dict[str, dict[str, typing.Any]] = {}
+
+    for service in services or []:
+        carrier_service_code = str(
+            service.carrier_service_code or ""
+        ).strip().upper()
+
+        metadata = service.metadata or {}
+
+        service_register_code = str(
+            metadata.get("service_register_code") or ""
+        ).strip()
+
+        package_format_kind = metadata.get("package_format_kind")
+
+        if not carrier_service_code or not service_register_code:
+            continue
+
+        entry = grouped.setdefault(
+            carrier_service_code,
+            {
+                "register_codes": set(),
+                "has_package_format_kind": False,
+            },
+        )
+
+        entry["register_codes"].add(service_register_code)
+
+        # If any row for this carrier service code has a package kind, then the
+        # carrier code is not safe to resolve through the generic carrier-level
+        # fallback. It must be resolved through the carrier+package-kind index
+        # or through the final strict service-level compatibility checks.
+        if package_format_kind not in [None, ""]:
+            entry["has_package_format_kind"] = True
+
+    resolved: dict[str, str] = {}
+
+    for carrier_service_code, entry in grouped.items():
+        register_codes = entry["register_codes"]
+
+        if entry["has_package_format_kind"]:
+            continue
+
+        if len(register_codes) != 1:
+            continue
+
+        resolved[carrier_service_code] = next(iter(register_codes))
+
+    return resolved
 
 ACTIVE_SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = (
     _service_register_by_carrier_and_format_index(ACTIVE_DEFAULT_SERVICES)
@@ -2263,6 +2343,14 @@ ACTIVE_SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = (
 
 SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = (
     _service_register_by_carrier_and_format_index(DEFAULT_SERVICES)
+)
+
+ACTIVE_SERVICE_REGISTER_BY_CARRIER = (
+    _service_register_by_carrier_index(ACTIVE_DEFAULT_SERVICES)
+)
+
+SERVICE_REGISTER_BY_CARRIER = (
+    _service_register_by_carrier_index(DEFAULT_SERVICES)
 )
 
 class ReferenceRecord(dict):
@@ -2623,7 +2711,6 @@ def _service_selector_index() -> dict[str, typing.Set[str]]:
 
     return index
 
-
 SERVICES_INDEX = _services_index()
 CARRIER_SERVICES_INDEX = _carrier_services_index()
 
@@ -2634,11 +2721,6 @@ ALL_CARRIER_SERVICE_CODES: typing.Set[str] = {
 }
 
 ALL_SERVICE_SELECTOR_INDEX = _all_service_selector_index()
-SERVICE_SELECTOR_INDEX = _service_selector_index()
-
-
-SERVICES_INDEX = _services_index()
-CARRIER_SERVICES_INDEX = _carrier_services_index()
 SERVICE_SELECTOR_INDEX = _service_selector_index()
 
 def _service_level_is_return_service(service: models.ServiceLevel) -> bool:
@@ -3327,9 +3409,12 @@ def resolve_service_register_code(
     broader than the active Karrio rating/reference catalogue.
 
     Rules:
-    - Use package-format-specific carrier mappings first.
-    - Use the full CSV catalogue for these mappings because inactive rows may
-      still contain required Click & Drop register metadata.
+    - Prefer package-format-specific carrier mappings.
+    - Use the full CSV catalogue for metadata, because inactive rows may still
+      contain required Click & Drop register data.
+    - If no package-format-specific mapping exists, fall back to a carrier-level
+      mapping only when that carrier code has exactly one unambiguous register
+      code across the catalogue.
     - Preserve active-only service exposure elsewhere; do not use this function
       to decide whether a service should appear in Karrio rates/references.
     """
@@ -3365,7 +3450,7 @@ def resolve_service_register_code(
         append_carrier_candidate(service_level.carrier_service_code)
 
     # First resolve by carrier serviceCode + package kind. This is the critical
-    # path for CRL24/CRL48:
+    # path for services where the register code depends on format, for example:
     #
     #   CRL24 + largeLetter -> 01
     #   CRL24 + parcel      -> 02
@@ -3386,6 +3471,23 @@ def resolve_service_register_code(
 
             if register_code not in [None, ""]:
                 return register_code
+
+    # If the package-format-specific lookup did not find a value, fall back to
+    # carrier-level metadata only when it is unambiguous. This fixes DDP/DTP
+    # services such as MPR where the CSV row has serviceRegisterCode=01 but no
+    # package_format_identifier/package kind.
+    for carrier_service_code in carrier_service_code_candidates:
+        active_register_code = ACTIVE_SERVICE_REGISTER_BY_CARRIER.get(
+            carrier_service_code
+        )
+
+        if active_register_code not in [None, ""]:
+            return active_register_code
+
+        register_code = SERVICE_REGISTER_BY_CARRIER.get(carrier_service_code)
+
+        if register_code not in [None, ""]:
+            return register_code
 
     if service_level is None:
         return None
@@ -3476,10 +3578,116 @@ def _service_metadata_bool(
 
     return None
 
+DUTY_PAID_INCOTERMS: typing.Set[str] = {
+    "DDP",  # Delivered Duty Paid
+    "DTP",  # Royal Mail / Parcelforce duty-and-tax-paid style selector
+}
 
-def _service_feature_tokens(service: typing.Any) -> typing.Set[str]:
-    """Return normalized feature tokens from service metadata."""
-    service_level = resolve_service_level(service)
+DUTY_UNPAID_INCOTERMS: typing.Set[str] = {
+    "DAP",  # Delivered At Place
+    "DDU",  # Delivered Duty Unpaid, legacy/non-Incoterms but commonly used
+    "DPU",
+    "DAT",
+    "EXW",
+    "FCA",
+    "FAS",
+    "FOB",
+    "CFR",
+    "CIF",
+    "CPT",
+    "CIP",
+}
+
+DUTY_PAID_FEATURE_TOKENS: typing.Set[str] = {
+    "ddp",
+    "dtp",
+    "duty_paid",
+    "dutypaid",
+    "duties_paid",
+    "dutiespaid",
+    "delivery_duty_paid",
+    "deliverydutypaid",
+    "taxes_paid",
+    "taxespaid",
+    "duties_taxes_paid",
+    "dutiestaxespaid",
+    "duty_tax_paid",
+    "dutytaxpaid",
+}
+
+DUTY_UNPAID_FEATURE_TOKENS: typing.Set[str] = {
+    "dap",
+    "ddu",
+    "duty_unpaid",
+    "dutyunpaid",
+    "duties_unpaid",
+    "dutiesunpaid",
+    "delivery_duty_unpaid",
+    "deliverydutyunpaid",
+}
+
+DUTY_PAID_BY_VALUES: typing.Set[str] = {
+    "sender",
+    "shipper",
+    "merchant",
+    "seller",
+    "account",
+    "account_holder",
+}
+
+DUTY_UNPAID_BY_VALUES: typing.Set[str] = {
+    "recipient",
+    "receiver",
+    "consignee",
+    "customer",
+    "buyer",
+}
+
+
+def _normalize_duty_token(value: typing.Any) -> typing.Optional[str]:
+    """Normalize incoterm/feature/service tokens used for duty-paid routing."""
+    value = _raw_state_value(value)
+
+    if value in [None, ""]:
+        return None
+
+    text = str(value).strip().lower()
+
+    if text == "":
+        return None
+
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def _selector_has_duty_paid_marker(*values: typing.Any) -> bool:
+    """
+    Return whether a service selector/name visibly represents DDP/DTP.
+
+    This intentionally supports inactive/full-catalogue services whose CSV
+    feature list may not include `ddp`, but whose Royal Mail product name or
+    Karrio service_code contains `ddp` or `dtp`.
+    """
+    for value in values:
+        token = _normalize_duty_token(value)
+
+        if token in [None, ""]:
+            continue
+
+        parts = {part for part in token.split("_") if part}
+
+        if parts.intersection({"ddp", "dtp"}):
+            return True
+
+        if any(marker in token for marker in DUTY_PAID_FEATURE_TOKENS):
+            return True
+
+    return False
+
+
+def _service_level_feature_tokens(
+    service_level: typing.Optional[models.ServiceLevel],
+) -> typing.Set[str]:
+    """Return normalized feature tokens from a ServiceLevel metadata object."""
     if service_level is None:
         return set()
 
@@ -3490,10 +3698,73 @@ def _service_feature_tokens(service: typing.Any) -> typing.Set[str]:
         feature_codes = _to_list(feature_codes)
 
     return {
-        str(token).strip().lower()
-        for token in feature_codes
-        if str(token).strip()
+        token
+        for token in (
+            _normalize_duty_token(raw_token)
+            for raw_token in feature_codes
+        )
+        if token
     }
+
+
+def _service_feature_tokens(service: typing.Any) -> typing.Set[str]:
+    """Return normalized feature tokens from active service metadata."""
+    return _service_level_feature_tokens(resolve_service_level(service))
+
+
+def service_supports_ddp(service: typing.Any) -> bool:
+    """
+    Return whether a Royal Mail service is DDP/DTP / duty-paid capable.
+
+    Royal Mail Click & Drop exposes duty-paid handling primarily through the
+    selected service/product. The Click & Drop order field `customsDutyCosts`
+    is documented as supported only for DDP services.
+
+    This resolver intentionally checks:
+    - active service catalogue
+    - full/inactive CSV catalogue
+    - raw carrier service codes
+    - visible DDP/DTP markers in service_code/service_name
+    """
+    if service in [None, ""]:
+        return False
+
+    if hasattr(service, "service_code") and hasattr(service, "carrier_service_code"):
+        service_level = service
+    else:
+        service_level = resolve_any_service_level(service)
+
+    if service_level is not None:
+        feature_tokens = _service_level_feature_tokens(service_level)
+
+        if feature_tokens.intersection(DUTY_PAID_FEATURE_TOKENS):
+            return True
+
+        return _selector_has_duty_paid_marker(
+            getattr(service_level, "service_code", None),
+            getattr(service_level, "service_name", None),
+            getattr(service_level, "carrier_service_code", None),
+        )
+
+    raw_selector = str(service).strip()
+
+    if raw_selector == "":
+        return False
+
+    if _selector_has_duty_paid_marker(raw_selector):
+        return True
+
+    raw_carrier_code = raw_selector.upper()
+
+    carrier_matches = [
+        candidate
+        for candidate in DEFAULT_SERVICES
+        if str(candidate.carrier_service_code or "").strip().upper()
+        == raw_carrier_code
+    ]
+
+    return any(service_supports_ddp(candidate) for candidate in carrier_matches)
+
 
 def service_supports_email_notification(service: typing.Any) -> bool:
     """
@@ -4101,6 +4372,11 @@ class ShippingOption(lib.Enum):
     other_costs = lib.OptionEnum("otherCosts", float)
     order_tax = lib.OptionEnum("orderTax", float)
     customs_duty_costs = lib.OptionEnum("customsDutyCosts", float)
+    duty_paid = lib.OptionEnum(
+        "duty_paid",
+        bool,
+        meta=dict(category="CUSTOMS"),
+    )
     total = lib.OptionEnum("total", float)
     currency = lib.OptionEnum("currency", str)
 
@@ -4240,6 +4516,30 @@ _OPTION_ALIASES = {
     "currency": "currency",
     "total": "total",
 
+    # Duty stuff
+    "dutyPaid": "duty_paid",
+    "duty_paid": "duty_paid",
+    "deliveryDutyPaid": "duty_paid",
+    "delivery_duty_paid": "duty_paid",
+    "ddp": "duty_paid",
+    "dtp": "duty_paid",
+
+    "dutyUnpaid": "duty_unpaid",
+    "duty_unpaid": "duty_unpaid",
+    "deliveryDutyUnpaid": "duty_unpaid",
+    "delivery_duty_unpaid": "duty_unpaid",
+    "dap": "duty_unpaid",
+    "ddu": "duty_unpaid",
+
+    "incoterm": "incoterm",
+    "incoterms": "incoterm",
+    "termsOfTrade": "terms_of_trade",
+    "terms_of_trade": "terms_of_trade",
+    "deliveryTerms": "delivery_terms",
+    "delivery_terms": "delivery_terms",
+    "dutyTerms": "duty_terms",
+    "duty_terms": "duty_terms",
+
     # Instructions / notes
     "shipmentNote": "shipment_note",
     "shipment_note": "shipment_note",
@@ -4360,6 +4660,12 @@ _BOOLEAN_OPTION_KEYS = {
     "tracking",
     "tracking_required",
     "trackingRequired",
+    "duty_paid",
+    "duty_unpaid",
+    "ddp",
+    "dtp",
+    "dap",
+    "ddu",
 }
 
 _CONFIG_BOOLEAN_KEYS = {
@@ -4500,6 +4806,306 @@ def _number(value, default=None):
     except Exception:
         return default
 
+def _raw_state_value(value):
+    """Return raw value from Karrio state/value wrappers."""
+    if hasattr(value, "state"):
+        value = value.state
+
+    if hasattr(value, "value") and not isinstance(
+        value,
+        (str, int, float, bool),
+    ):
+        value = value.value
+
+    return value
+
+
+def _source_raw_value(source, *keys, default=None):
+    """Return first present value from source and unwrap Karrio wrappers."""
+    return _raw_state_value(_source_value(source, *keys, default=default))
+
+
+def _truthy_config_value(value: typing.Any) -> bool:
+    """Return whether a config/option value should be treated as true."""
+    value = _raw_state_value(value)
+
+    if value in [None, ""]:
+        return False
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        return value.strip().lower() in [
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+            "enabled",
+        ]
+
+    return bool(value)
+
+
+def _option_feature_tokens(value: typing.Any) -> typing.List[str]:
+    """Normalize options.features / options.required_features to tokens."""
+    value = _raw_state_value(value)
+
+    if value is None:
+        return []
+
+    if isinstance(value, dict):
+        return [
+            str(key).strip()
+            for key, enabled in value.items()
+            if key not in [None, ""]
+            and _truthy_config_value(enabled)
+        ]
+
+    if isinstance(value, (list, tuple, set)):
+        tokens = []
+
+        for item in value:
+            tokens.extend(_option_feature_tokens(item))
+
+        return tokens
+
+    text = str(value).strip()
+
+    if text == "":
+        return []
+
+    for separator in [",", ";", "|", ":"]:
+        text = text.replace(separator, ",")
+
+    return [
+        token.strip()
+        for token in text.split(",")
+        if token.strip()
+    ]
+
+
+def normalize_customs_incoterm(value: typing.Any) -> typing.Optional[str]:
+    """Normalize a customs incoterm / duty-routing value."""
+    value = _raw_state_value(value)
+
+    if value in [None, ""]:
+        return None
+
+    normalized = str(value).strip().upper().replace("-", "_").replace(" ", "_")
+
+    return normalized or None
+
+
+def normalize_duty_paid_by(value: typing.Any) -> typing.Optional[str]:
+    """Normalize customs.duty.paid_by values."""
+    value = _raw_state_value(value)
+
+    if value in [None, ""]:
+        return None
+
+    normalized = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+
+    return normalized or None
+
+
+def _first_raw_value(*values: typing.Any) -> typing.Any:
+    """Return the first non-empty raw value from Karrio wrappers/scalars."""
+    for value in values:
+        value = _raw_state_value(value)
+
+        if value not in [None, ""]:
+            return value
+
+    return None
+
+
+def _request_incoterm(
+    customs: typing.Any = None,
+    options: typing.Any = None,
+) -> typing.Optional[str]:
+    """Resolve duty-routing incoterm from customs first, then options."""
+    return normalize_customs_incoterm(
+        _first_raw_value(
+            _source_raw_value(
+                customs,
+                "incoterm",
+                "incoterms",
+                "terms_of_trade",
+                "termsOfTrade",
+            ),
+            _source_raw_value(
+                options,
+                "incoterm",
+                "incoterms",
+                "terms_of_trade",
+                "termsOfTrade",
+                "delivery_terms",
+                "deliveryTerms",
+                "duty_terms",
+                "dutyTerms",
+            ),
+        )
+    )
+
+
+def _duty_has_meaningful_sender_signal(duty: typing.Any) -> bool:
+    """
+    Return whether customs.duty contains more than Karrio's default paid_by.
+
+    Karrio core defaults models.Duty.paid_by to "sender". Therefore
+    paid_by=sender alone is not reliable enough to classify a Royal Mail
+    shipment as DDP. Treat it as intentional only when accompanied by another
+    duty field.
+    """
+    return any(
+        _source_raw_value(duty, *keys) not in [None, ""]
+        for keys in [
+            ("declared_value", "declaredValue", "amount", "value"),
+            ("account_number", "accountNumber"),
+            ("currency",),
+            ("id",),
+        ]
+    )
+
+
+def customs_duty_amount(
+    customs: typing.Any = None,
+    options: typing.Any = None,
+) -> typing.Any:
+    """Return the explicitly supplied customs duty amount, if any."""
+    normalized_options = (
+        normalize_option_keys(options)
+        if isinstance(options, dict)
+        else options
+    )
+
+    explicit_option_value = _source_raw_value(
+        normalized_options,
+        "customs_duty_costs",
+        "customsDutyCosts",
+    )
+
+    if explicit_option_value not in [None, ""]:
+        return explicit_option_value
+
+    duty = _source_raw_value(customs, "duty")
+
+    return _source_raw_value(
+        duty,
+        "declared_value",
+        "declaredValue",
+        "amount",
+        "value",
+    )
+
+def is_duty_paid_requested(
+    customs: typing.Any = None,
+    options: typing.Any = None,
+) -> bool:
+    """
+    Return whether the shipment is explicitly asking for DDP/DTP handling.
+
+    Shipment rules:
+    - customs/options incoterm DDP or DTP means duty-paid.
+    - customs/options incoterm DAP/DDU/etc means not duty-paid.
+    - options.duty_paid / options.ddp / options.dtp means duty-paid.
+    - options.duty_unpaid / options.dap / options.ddu means not duty-paid.
+    - options.features containing ddp/dtp means duty-paid.
+    - options.features containing dap/ddu means not duty-paid.
+    - customsDutyCosts means duty-paid only when no explicit non-paid term exists.
+    - Karrio's default customs.duty.paid_by == "sender" alone is ignored.
+    """
+    normalized_options = (
+        normalize_option_keys(options)
+        if isinstance(options, dict)
+        else options
+    )
+
+    incoterm = _request_incoterm(
+        customs=customs,
+        options=normalized_options,
+    )
+
+    if incoterm in DUTY_PAID_INCOTERMS:
+        return True
+
+    if incoterm in DUTY_UNPAID_INCOTERMS:
+        return False
+
+    explicit_duty_unpaid_option = _source_raw_value(
+        normalized_options,
+        "duty_unpaid",
+        "dutyUnpaid",
+        "delivery_duty_unpaid",
+        "deliveryDutyUnpaid",
+        "dap",
+        "ddu",
+    )
+
+    if explicit_duty_unpaid_option not in [None, ""] and _truthy_config_value(
+        explicit_duty_unpaid_option
+    ):
+        return False
+
+    explicit_duty_paid_option = _source_raw_value(
+        normalized_options,
+        "duty_paid",
+        "dutyPaid",
+        "delivery_duty_paid",
+        "deliveryDutyPaid",
+        "ddp",
+        "dtp",
+    )
+
+    if explicit_duty_paid_option not in [None, ""]:
+        return _truthy_config_value(explicit_duty_paid_option)
+
+    raw_features = _source_raw_value(
+        normalized_options,
+        "features",
+        "service_features",
+        "serviceFeatures",
+        "required_features",
+        "requiredFeatures",
+    )
+
+    feature_tokens = {
+        token
+        for token in (
+            _normalize_duty_token(raw_token)
+            for raw_token in _option_feature_tokens(raw_features)
+        )
+        if token
+    }
+
+    if feature_tokens.intersection(DUTY_UNPAID_FEATURE_TOKENS):
+        return False
+
+    if feature_tokens.intersection(DUTY_PAID_FEATURE_TOKENS):
+        return True
+
+    duty = _source_raw_value(customs, "duty")
+    paid_by = normalize_duty_paid_by(
+        _source_raw_value(
+            duty,
+            "paid_by",
+            "paidBy",
+            "payer",
+        )
+    )
+
+    if paid_by in DUTY_UNPAID_BY_VALUES:
+        return False
+
+    if paid_by in DUTY_PAID_BY_VALUES and _duty_has_meaningful_sender_signal(duty):
+        return True
+
+    return customs_duty_amount(
+        customs=customs,
+        options=normalized_options,
+    ) not in [None, ""]
 
 def weight_to_grams(
     value,
