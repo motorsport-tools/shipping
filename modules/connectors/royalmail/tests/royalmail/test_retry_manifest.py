@@ -24,7 +24,6 @@ class TestRoyalMailClickandDropRetryManifest(unittest.TestCase):
         """Serialize a manifest retry payload into the Royal Mail manifest identifier format."""
         request = fixture.gateway.mapper.create_retry_manifest_request(self.RetryManifestRequest)
 
-        print(f"Generated request: {request.serialize()}")
         self.assertEqual(request.serialize(), fixture.RetryManifestIdentifierRequest)
 
     def test_retry_manifest(self):
@@ -35,7 +34,6 @@ class TestRoyalMailClickandDropRetryManifest(unittest.TestCase):
             request = fixture.gateway.mapper.create_retry_manifest_request(self.RetryManifestRequest)
             fixture.gateway.proxy.retry_manifest(request)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/manifests/retry/1002",
@@ -50,7 +48,6 @@ class TestRoyalMailClickandDropRetryManifest(unittest.TestCase):
             response = fixture.gateway.proxy.retry_manifest(request)
             parsed_response = list(fixture.gateway.mapper.parse_retry_manifest_response(response))
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedRetryManifestResponse,
@@ -65,7 +62,6 @@ class TestRoyalMailClickandDropRetryManifest(unittest.TestCase):
             response = fixture.gateway.proxy.retry_manifest(request)
             parsed_response = list(fixture.gateway.mapper.parse_retry_manifest_response(response))
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedRetryManifestErrorResponse,

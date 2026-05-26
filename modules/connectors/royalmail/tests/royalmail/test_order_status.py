@@ -3,17 +3,13 @@
  
 """Royal Mail Click and Drop carrier order status update tests."""
 
-import logging
 import unittest
 from unittest.mock import patch
 
 from . import fixture
-import logging
 import karrio.sdk as karrio
 import karrio.lib as lib
 import karrio.core.models as models
-
-logger = logging.getLogger(__name__)
 
 
 class TestRoyalMailClickandDropOrderStatus(unittest.TestCase):
@@ -25,7 +21,6 @@ class TestRoyalMailClickandDropOrderStatus(unittest.TestCase):
         """Serialize normalized order status items into the Royal Mail bulk status update payload."""
         request = fixture.gateway.mapper.create_order_status_request(self.OrderStatusRequest)
 
-        print(f"Generated request: {request.serialize()}")
         self.assertEqual(request.serialize(), fixture.OrderStatusRequest)
 
     def test_update_order_status(self):
@@ -38,7 +33,6 @@ class TestRoyalMailClickandDropOrderStatus(unittest.TestCase):
             )
             fixture.gateway.proxy.update_order_status(request)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/orders/status",
@@ -57,7 +51,6 @@ class TestRoyalMailClickandDropOrderStatus(unittest.TestCase):
                 fixture.gateway.mapper.parse_order_status_response(response)
             )
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedOrderStatusResponse,
@@ -76,7 +69,6 @@ class TestRoyalMailClickandDropOrderStatus(unittest.TestCase):
                 fixture.gateway.mapper.parse_order_status_response(response)
             )
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedOrderStatusErrorResponse,
@@ -86,7 +78,6 @@ class TestRoyalMailClickandDropOrderStatus(unittest.TestCase):
         """Serialize despatchedByOtherCourier updates with the extra carrier/tracking fields Royal Mail requires."""
         request = fixture.gateway.mapper.create_order_status_request(fixture.OrderStatusOtherCourierPayload)
 
-        print(f"Other courier status request: {request.serialize()}")
         self.assertEqual(
             request.serialize()["items"][0]["shippingCarrier"],
             "Other Carrier",
@@ -101,7 +92,6 @@ class TestRoyalMailClickandDropOrderStatus(unittest.TestCase):
             response = fixture.gateway.proxy.update_order_status(request)
             parsed = list(fixture.gateway.mapper.parse_order_status_response(response))
 
-            print(f"Parsed order status partial success: {lib.to_dict(parsed)}")
             self.assertIsNotNone(parsed[0])
             self.assertFalse(parsed[0].success)
             self.assertEqual(len(parsed[1]), 1)

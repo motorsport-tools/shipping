@@ -179,9 +179,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         with patch("karrio.mappers.royalmail.proxy.lib.request") as mock:
             rates, messages = fetch_rates(payload)
 
-        print("rates:", rates)
-        print("messages:", messages)
-
         mock.assert_not_called()
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_tracked_24"])
@@ -193,9 +190,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         )
 
         rates, messages = fetch_rates(payload)
-
-        print("rates:", rates)
-        print("messages:", messages)
 
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_tracked_24"])
@@ -209,9 +203,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
 
         rates, messages = fetch_rates(payload)
 
-        print("rates:", rates)
-        print("messages:", messages)
-
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_tracked_24"])
         self.assertEqual(rates[0]["meta"]["carrier_service_code"], "TPN24")
@@ -223,9 +214,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         )
 
         rates, messages = fetch_rates(payload)
-
-        print("rates:", rates)
-        print("messages:", messages)
 
         self.assertEqual(messages, [])
         self.assertEqual(
@@ -247,10 +235,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
 
         rates, messages = fetch_rates(payload, gateway=gateway)
 
-        print("configured service codes:", gateway.settings.configured_shipping_service_codes)
-        print("rates:", rates)
-        print("messages:", messages)
-
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_tracked_24"])
 
@@ -267,17 +251,10 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
 
         rates, messages = fetch_rates(payload, gateway=gateway)
 
-        print("configured service codes:", gateway.settings.configured_shipping_service_codes)
-        print("rates:", rates)
-        print("messages:", messages)
-
         self.assertEqual(rates, [])
         self.assertNotIn(
             "parcel_force_express_24",
-            [
-                rate["service"]
-                for rate in rates
-            ],
+            [rate["service"] for rate in rates],
         )
 
     def test_is_tracked_false_does_not_filter_untracked_requested_service(self):
@@ -288,9 +265,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         )
 
         rates, messages = fetch_rates(payload)
-
-        print("rates:", rates)
-        print("messages:", messages)
 
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_first_class_letter"])
@@ -303,9 +277,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         )
 
         rates, messages = fetch_rates(payload)
-
-        print("rates:", rates)
-        print("messages:", messages)
 
         self.assertEqual(rates, [])
         self.assertTrue(
@@ -333,10 +304,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
 
                 rates, messages = fetch_rates(payload)
 
-                print("options:", options)
-                print("rates:", rates)
-                print("messages:", messages)
-
                 self.assertEqual(messages, [])
                 assert_rates_support_feature(self, rates, "tracked")
 
@@ -348,9 +315,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         )
 
         rates, messages = fetch_rates(payload)
-
-        print("rates:", rates)
-        print("messages:", messages)
 
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_first_class_letter"])
@@ -370,9 +334,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
 
         rates, messages = fetch_rates(payload)
 
-        print("rates:", rates)
-        print("messages:", messages)
-
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_first_class_letter"])
         self.assertEqual(
@@ -388,9 +349,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         )
 
         rates, messages = fetch_rates(payload)
-
-        print("rates:", rates)
-        print("messages:", messages)
 
         self.assertEqual(messages, [])
         self.assertEqual(rate_service_codes(rates), ["royal_mail_tracked_24"])
@@ -408,9 +366,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
         )
 
         rates, messages = fetch_rates(payload)
-
-        print("rates:", rates)
-        print("messages:", messages)
 
         self.assertEqual(rates, [])
         self.assertTrue(
@@ -432,9 +387,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
 
         rates, messages = fetch_rates(payload)
 
-        print("rates:", rates)
-        print("messages:", messages)
-
         self.assertEqual(rates, [])
         self.assertTrue(
             any(
@@ -455,9 +407,6 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
 
         rates, messages = fetch_rates(payload)
 
-        print("rates:", rates)
-        print("messages:", messages)
-
         self.assertEqual(messages, [])
         self.assertGreater(len(rates), 0)
 
@@ -466,6 +415,202 @@ class TestRoyalMailRateApiSelectorsAndOptions(unittest.TestCase):
                 service = service_level(rate["service"])
                 self.assertEqual(service.features.shipment_type, "returns")
 
+    def test_customs_incoterm_ddp_filters_to_ddp_services(self):
+        gateway = make_gateway(
+            {
+                "shipping_services": [
+                    "royal_mail_international_tracked_small_parcel",
+                    "royal_mail_international_ddp_tracked_small_parcel",
+                    "royal_mail_international_standard_small_parcel",
+                    "royal_mail_international_ddp_standard_small_parcel",
+                ],
+            }
+        )
+
+        payload = international_payload(
+            country_code="FR",
+            package_format="smallParcel",
+            services=[],
+        )
+
+        payload["customs"] = {
+            "certify": True,
+            "content_type": "merchandise",
+            "incoterm": "DDP",
+            "signer": "carwyn",
+            "duty": {
+                "currency": "GBP",
+                "declared_value": 50,
+                "paid_by": "sender",
+            },
+            "commodities": [
+                {
+                    "title": "ipod",
+                    "quantity": 1,
+                    "value_amount": 50,
+                    "value_currency": "GBP",
+                    "weight": 500,
+                    "weight_unit": "G",
+                    "origin_country": "CN",
+                    "hs_code": "12345678",
+                }
+            ],
+        }
+
+        rates, messages = fetch_rates(payload, gateway=gateway)
+
+        self.assertEqual(messages, [])
+        self.assertGreater(len(rates), 0)
+
+        services = rate_service_codes(rates)
+
+        self.assertIn(
+            "royal_mail_international_ddp_tracked_small_parcel",
+            services,
+        )
+        self.assertIn(
+            "royal_mail_international_ddp_standard_small_parcel",
+            services,
+        )
+        self.assertNotIn(
+            "royal_mail_international_tracked_small_parcel",
+            services,
+        )
+        self.assertNotIn(
+            "royal_mail_international_standard_small_parcel",
+            services,
+        )
+
+        for rate in rates:
+            with self.subTest(service=rate["service"]):
+                self.assertTrue(
+                    provider_units.service_supports_ddp(rate["service"]),
+                    msg=f"{rate['service']} should have been removed by the DDP filter",
+                )
+
+    def test_customs_incoterm_dap_filters_out_ddp_services(self):
+        gateway = make_gateway(
+            {
+                "shipping_services": [
+                    "royal_mail_international_tracked_small_parcel",
+                    "royal_mail_international_ddp_tracked_small_parcel",
+                    "royal_mail_international_standard_small_parcel",
+                    "royal_mail_international_ddp_standard_small_parcel",
+                ],
+            }
+        )
+
+        payload = international_payload(
+            country_code="FR",
+            package_format="smallParcel",
+            services=[],
+        )
+
+        payload["customs"] = {
+            "certify": True,
+            "content_type": "merchandise",
+            "incoterm": "DAP",
+            "signer": "carwyn",
+            "duty": {
+                "currency": "GBP",
+                "declared_value": 50,
+                "paid_by": "recipient",
+            },
+            "commodities": [
+                {
+                    "title": "ipod",
+                    "quantity": 1,
+                    "value_amount": 50,
+                    "value_currency": "GBP",
+                    "weight": 500,
+                    "weight_unit": "G",
+                    "origin_country": "CN",
+                    "hs_code": "12345678",
+                }
+            ],
+        }
+
+        rates, messages = fetch_rates(payload, gateway=gateway)
+
+        self.assertEqual(messages, [])
+        self.assertGreater(len(rates), 0)
+
+        services = rate_service_codes(rates)
+
+        self.assertIn(
+            "royal_mail_international_tracked_small_parcel",
+            services,
+        )
+        self.assertIn(
+            "royal_mail_international_standard_small_parcel",
+            services,
+        )
+        self.assertNotIn(
+            "royal_mail_international_ddp_tracked_small_parcel",
+            services,
+        )
+        self.assertNotIn(
+            "royal_mail_international_ddp_standard_small_parcel",
+            services,
+        )
+
+        for rate in rates:
+            with self.subTest(service=rate["service"]):
+                self.assertFalse(
+                    provider_units.service_supports_ddp(rate["service"]),
+                    msg=f"{rate['service']} should have been removed by the DAP filter",
+                )
+
+    def test_customs_incoterm_ddp_rejects_requested_non_ddp_service_with_message(self):
+        gateway = make_gateway(
+            {
+                "shipping_services": [
+                    "royal_mail_international_tracked_small_parcel",
+                    "royal_mail_international_ddp_tracked_small_parcel",
+                ],
+            }
+        )
+
+        payload = international_payload(
+            country_code="FR",
+            package_format="smallParcel",
+            services=["royal_mail_international_tracked_small_parcel"],
+        )
+
+        payload["customs"] = {
+            "certify": True,
+            "content_type": "merchandise",
+            "incoterm": "DDP",
+            "signer": "carwyn",
+            "duty": {
+                "currency": "GBP",
+                "declared_value": 50,
+                "paid_by": "sender",
+            },
+            "commodities": [
+                {
+                    "title": "ipod",
+                    "quantity": 1,
+                    "value_amount": 50,
+                    "value_currency": "GBP",
+                    "weight": 500,
+                    "weight_unit": "G",
+                    "origin_country": "CN",
+                    "hs_code": "12345678",
+                }
+            ],
+        }
+
+        rates, messages = fetch_rates(payload, gateway=gateway)
+
+        self.assertEqual(rates, [])
+        self.assertTrue(
+            any(
+                message["code"] == "ddp_service_required"
+                for message in messages
+            ),
+            messages,
+        )
 
 if __name__ == "__main__":
     unittest.main()

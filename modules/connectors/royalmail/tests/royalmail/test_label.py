@@ -3,7 +3,6 @@
  
 """Royal Mail Click and Drop carrier label retrieval tests."""
 
-import logging
 import unittest
 from unittest.mock import patch
 
@@ -25,7 +24,6 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
         """Serialize a label lookup request with document flags into Royal Mail query parameters."""
         request = fixture.gateway.mapper.create_label_request(self.LabelRequest)
 
-        print(f"Generated request: {request.serialize()}")
         self.assertEqual(request.serialize(), fixture.LabelRequest)
 
     def test_get_label(self):
@@ -36,7 +34,6 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
             request = fixture.gateway.mapper.create_label_request(self.LabelRequest)
             fixture.gateway.proxy.get_label(request)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/orders/12345678/label"
@@ -94,7 +91,6 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
             response = fixture.gateway.proxy.get_label(request)
             parsed_response = list(fixture.gateway.mapper.parse_label_response(response))
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedLabelResponse,
@@ -109,7 +105,6 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
             response = fixture.gateway.proxy.get_label(request)
             parsed_response = list(fixture.gateway.mapper.parse_label_response(response))
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedLabelErrorResponse,
@@ -160,7 +155,6 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
             response = fixture.gateway.proxy.get_label(request)
             parsed = list(fixture.gateway.mapper.parse_label_response(response))
 
-            print(f"Parsed label nested errors: {lib.to_dict(parsed)}")
             self.assertIsNone(parsed[0])
             self.assertEqual(len(parsed[1]), 1)
             self.assertEqual(parsed[1][0].code, "NotFound")

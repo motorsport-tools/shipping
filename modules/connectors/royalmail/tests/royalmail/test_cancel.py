@@ -22,7 +22,6 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
     def test_create_cancel_shipment_request(self):
         """Serialize a Karrio shipment-cancel request into the Royal Mail order identifier payload."""
         request = fixture.gateway.mapper.create_cancel_shipment_request(self.ShipmentCancelRequest)
-        print(f"Generated request: {lib.to_dict(request.serialize())}")
         self.assertEqual(lib.to_dict(request.serialize()), fixture.ShipmentCancelRequest)
         
 
@@ -33,7 +32,6 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
 
             karrio.Shipment.cancel(self.ShipmentCancelRequest).from_(fixture.gateway)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/orders/12345678",
@@ -51,7 +49,6 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
                 .parse()
             )
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedShipmentCancelResponse,
@@ -69,7 +66,6 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
                 .parse()
             )
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(lib.to_dict(parsed_response), fixture.ParsedShipmentCancelErrorResponse)
         
     def test_create_cancel_shipment_request_with_reference(self):
@@ -77,7 +73,6 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
         request = models.ShipmentCancelRequest(**fixture.ShipmentCancelReferencePayload)
         serialized = fixture.gateway.mapper.create_cancel_shipment_request(request).serialize()
 
-        print(f"Serialized cancel-by-reference request: {serialized}")
         self.assertEqual(
             serialized,
             {"orderIdentifiers": "%22ORDER-1001%22"},
@@ -94,7 +89,6 @@ class TestRoyalMailClickandDropCancel(unittest.TestCase):
                 .parse()
             )
 
-            print(f"Parsed cancel multi-error response: {lib.to_dict(parsed)}")
             self.assertIsNone(parsed[0])
             self.assertEqual(len(parsed[1]), 2)
             self.assertEqual(parsed[1][0].code, "NotFound")

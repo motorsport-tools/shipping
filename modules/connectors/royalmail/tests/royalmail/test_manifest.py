@@ -26,7 +26,6 @@ class TestRoyalMailClickandDropManifest(unittest.TestCase):
 
         # Royal Mail's manifest creation schema accepts `carrierName` only.
         # Any generic Karrio `shipment_identifiers` must be ignored here.
-        print(f"Generated request: {serialized}")
         self.assertEqual(serialized, fixture.ManifestRequest)
         self.assertNotIn("shipmentIdentifiers", serialized)
 
@@ -37,7 +36,6 @@ class TestRoyalMailClickandDropManifest(unittest.TestCase):
 
             karrio.Manifest.create(self.ManifestRequest).from_(fixture.gateway)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/manifests",
@@ -54,7 +52,6 @@ class TestRoyalMailClickandDropManifest(unittest.TestCase):
                 .parse()
             )
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(lib.to_dict(parsed_response), fixture.ParsedManifestResponse)
 
     def test_parse_error_response(self):
@@ -68,7 +65,6 @@ class TestRoyalMailClickandDropManifest(unittest.TestCase):
                 .parse()
             )
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(lib.to_dict(parsed_response), fixture.ParsedManifestErrorResponse)
 
     def test_parse_manifest_response_without_pdf(self):

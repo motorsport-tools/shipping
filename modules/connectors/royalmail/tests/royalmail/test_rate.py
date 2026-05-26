@@ -58,7 +58,6 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
         """Keep rate request serialization aligned with the universal Karrio rating payload."""
         request = fixture.gateway.mapper.create_rate_request(self.RateRequest)
 
-        print(f"Generated request: {lib.to_dict(request.serialize())}")
 
         self.assertEqual(
             lib.to_dict(request.serialize()),
@@ -76,8 +75,7 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
 
             rates, messages = lib.to_dict(response)
 
-            print(f"Resolved rates: {rates}")
-            print(f"Rating messages: {messages}")
+
 
             mock.assert_not_called()
 
@@ -136,7 +134,6 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
             lib.Deserializable(internal_response, lambda value: value)
         )
 
-        print(f"Parsed response: {lib.to_dict(parsed_response)}")
 
         self.assertListEqual(
             lib.to_dict(parsed_response),
@@ -167,7 +164,6 @@ class TestRoyalMailClickandDropRating(unittest.TestCase):
             lib.Deserializable(internal_response, lambda value: value)
         )
 
-        print(f"Error response: {lib.to_dict(parsed_response)}")
 
         self.assertListEqual(
             lib.to_dict(parsed_response),

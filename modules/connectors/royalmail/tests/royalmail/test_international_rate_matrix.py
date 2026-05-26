@@ -100,6 +100,40 @@ Customs = {
     "duty": {
         "currency": "GBP",
         "declared_value": 30,
+        "paid_by": "recipient",
+    },
+    "incoterm": "DAP",
+    "invoice": "INV-INTL-001",
+    "invoice_date": "2026-05-15",
+    "signer": "Sales Team",
+}
+
+DapCustoms = {
+    "certify": True,
+    "commercial_invoice": True,
+    "commodities": [Commodity],
+    "content_description": "Consumer electronics",
+    "content_type": "merchandise",
+    "duty": {
+        "currency": "GBP",
+        "declared_value": 30,
+        "paid_by": "recipient",
+    },
+    "incoterm": "DAP",
+    "invoice": "INV-INTL-001",
+    "invoice_date": "2026-05-15",
+    "signer": "Sales Team",
+}
+
+DdpCustoms = {
+    "certify": True,
+    "commercial_invoice": True,
+    "commodities": [Commodity],
+    "content_description": "Consumer electronics",
+    "content_type": "merchandise",
+    "duty": {
+        "currency": "GBP",
+        "declared_value": 30,
         "paid_by": "sender",
     },
     "incoterm": "DDP",
@@ -160,12 +194,13 @@ def rate_payload(
     parcel: dict,
     services=None,
     reference: str = None,
+    customs: dict = None,
 ) -> dict:
     return {
         "shipper": copy.deepcopy(GBShipper),
         "recipient": copy.deepcopy(Recipients[country_code]),
         "parcels": [copy.deepcopy(parcel)],
-        "customs": copy.deepcopy(Customs),
+        "customs": copy.deepcopy(customs or DapCustoms),
         "payment": {"paid_by": "sender"},
         "reference": reference or f"RATE-INTL-{country_code}",
         "services": copy.deepcopy(services or []),
@@ -174,7 +209,6 @@ def rate_payload(
             "shipping_date": "2026-05-15T13:34:00Z",
         },
     }
-
 
 def fetch_rates(payload: dict):
     response = (
@@ -260,19 +294,7 @@ class TestRoyalMailInternationalRateMatrix(unittest.TestCase):
 
         rates, messages = lib.to_dict(response)
 
-        print(
-            "configured service codes:",
-            configured_gateway.settings.configured_shipping_service_codes,
-        )
-        print(
-            "shipping services:",
-            [
-                service.service_code
-                for service in configured_gateway.settings.shipping_services
-            ],
-        )
-        print("rates:", rates)
-        print("messages:", messages)
+
 
         self.assertEqual(messages, [])
 

@@ -557,11 +557,18 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
     def test_create_shipment_request_includes_ddp_customs_duty_in_total(self):
         """Add customs duty to total when DDP causes customsDutyCosts to be serialized."""
         payload = copy.deepcopy(fixture.ShipmentPayloadInternational)
+
+        # Use an active DDP small-parcel service. This resolves to Royal Mail MPR
+        # but also carries the email_notifications feature in services.csv, so the
+        # inherited fixture notification options remain valid.
+        payload["service"] = "royal_mail_international_ddp_tracked_small_parcel"
+
         payload["options"].pop("subtotal", None)
         payload["options"].pop("total", None)
         payload["options"]["shipping_cost_charged"] = 3.5
         payload["options"]["order_tax"] = 1.2
         payload["options"]["customs_duty_costs"] = 4.0
+
         payload["customs"] = {
             "content_type": "merchandise",
             "incoterm": "DDP",

@@ -23,7 +23,6 @@ class TestRoyalMailClickandDropInternationalRating(unittest.TestCase):
 
     def test_create_rate_request(self):
         request = gateway.mapper.create_rate_request(self.RateRequest)
-        print(f"Generated request: {lib.to_dict(request.serialize())}")
 
         self.assertEqual(
             lib.to_dict(request.serialize()),
@@ -39,12 +38,9 @@ class TestRoyalMailClickandDropInternationalRating(unittest.TestCase):
                     .from_(gateway)
                     .parse()
                 )
-
                 rates, messages = lib.to_dict(response)
-                print(f"{country_code} rates: {rates}")
-                print(f"{country_code} messages: {messages}")
 
-                self.assertEqual(messages, [])
+                self.assertEqual(messages, [], messages)
 
                 rate = next(
                     (
@@ -57,7 +53,10 @@ class TestRoyalMailClickandDropInternationalRating(unittest.TestCase):
 
                 self.assertIsNotNone(
                     rate,
-                    f"Expected {INTERNATIONAL_LARGE_LETTER_SERVICE} for {country_code}",
+                    (
+                        f"Expected {INTERNATIONAL_LARGE_LETTER_SERVICE} for {country_code}. "
+                        f"rates={rates!r} messages={messages!r}"
+                    ),
                 )
                 self.assertEqual(rate["carrier_id"], "royalmail")
                 self.assertEqual(rate["carrier_name"], "royalmail")
@@ -102,7 +101,6 @@ class TestRoyalMailClickandDropInternationalRating(unittest.TestCase):
         parsed_response = gateway.mapper.parse_rate_response(
             lib.Deserializable(internal_response, lambda value: value)
         )
-        print(f"Parsed response: {lib.to_dict(parsed_response)}")
 
         self.assertListEqual(
             lib.to_dict(parsed_response),
@@ -132,7 +130,6 @@ class TestRoyalMailClickandDropInternationalRating(unittest.TestCase):
             lib.Deserializable(internal_response, lambda value: value)
         )
 
-        print(f"Error response: {lib.to_dict(parsed_response)}")
 
         self.assertListEqual(
             lib.to_dict(parsed_response),
@@ -146,7 +143,6 @@ class TestRoyalMailClickandDropInternationalShipment(unittest.TestCase):
         self.ShipmentRequest = models.ShipmentRequest(
             **copy.deepcopy(InternationalShipmentPayloads["FR"])
         )
-
     def test_create_shipment_request(self):
         for country_code in InternationalShipmentPayloads:
             with self.subTest(country_code=country_code):
@@ -155,7 +151,6 @@ class TestRoyalMailClickandDropInternationalShipment(unittest.TestCase):
                     models.ShipmentRequest(**payload)
                 )
                 serialized = lib.to_dict(request.serialize())
-                print(f"{country_code} shipment request: {serialized}")
 
                 item = serialized["items"][0]
                 package = item["packages"][0]
@@ -169,11 +164,16 @@ class TestRoyalMailClickandDropInternationalShipment(unittest.TestCase):
                     item["recipient"]["address"]["postcode"],
                     InternationalRecipients[country_code]["postal_code"],
                 )
+
                 self.assertEqual(item["currencyCode"], "GBP")
                 self.assertEqual(item["subtotal"], 30.0)
                 self.assertEqual(item["shippingCostCharged"], 0.0)
-                self.assertEqual(item["customsDutyCosts"], 30.0)
-                self.assertEqual(item["total"], 60.0)
+
+                # Standard OTA international shipment uses DAP in this fixture.
+                # Duty is paid by the recipient, so Click & Drop should not receive
+                # customsDutyCosts for this order.
+                self.assertNotIn("customsDutyCosts", item)
+                self.assertEqual(item["total"], 30.0)
 
                 self.assertTrue(item["label"]["includeCN"])
                 self.assertEqual(
@@ -219,7 +219,6 @@ class TestRoyalMailClickandDropInternationalShipment(unittest.TestCase):
                     f"SDK response: {lib.to_dict(response)}"
                 )
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{gateway.settings.server_url}/orders",
@@ -235,7 +234,6 @@ class TestRoyalMailClickandDropInternationalShipment(unittest.TestCase):
                 .from_(gateway)
                 .parse()
             )
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
 
             self.assertListEqual(
                 lib.to_dict(parsed_response),
@@ -251,7 +249,6 @@ class TestRoyalMailClickandDropInternationalShipment(unittest.TestCase):
                 .from_(gateway)
                 .parse()
             )
-            print(f"Error response: {lib.to_dict(parsed_response)}")
 
             self.assertListEqual(
                 lib.to_dict(parsed_response),
@@ -282,8 +279,33 @@ class TestRoyalMailClickandDropInternationalShipment(unittest.TestCase):
         self.assertEqual(content["customsCode"], "87654321")
         self.assertEqual(content["originCountryCode"], "CN")
         self.assertEqual(content["customsDeclarationCategory"], "saleOfGoods")
-        self.assertEqual(item["customsDutyCosts"], 30.0)
 
+        # Raw OTA is still the standard non-DDP International Tracked service.
+        # Because this fixture uses DAP, customsDutyCosts should not be serialized.
+        self.assertNotIn("customsDutyCosts", item)
+
+
+    def test_create_ddp_shipment_request_includes_customs_duty_costs(self):
+        payload = copy.deepcopy(InternationalShipmentPayloads["FR"])
+        payload["service"] = "royal_mail_international_business_parcel_tracked_ddp"
+        payload["customs"] = copy.deepcopy(InternationalCustoms)
+        payload["customs"]["incoterm"] = "DDP"
+        payload["customs"]["duty"]["paid_by"] = "sender"
+
+        request = gateway.mapper.create_shipment_request(
+            models.ShipmentRequest(**payload)
+        )
+
+        serialized = lib.to_dict(request.serialize())
+
+        item = serialized["items"][0]
+
+        self.assertEqual(item["postageDetails"]["serviceCode"], "MPR")
+        self.assertEqual(item["postageDetails"]["serviceRegisterCode"], "01")
+        self.assertEqual(item["customsDutyCosts"], 30.0)
+        self.assertEqual(item["subtotal"], 30.0)
+        self.assertEqual(item["shippingCostCharged"], 0.0)
+        self.assertEqual(item["total"], 60.0)
 
 if __name__ == "__main__":
     unittest.main()
@@ -372,9 +394,9 @@ InternationalCustoms = {
     "duty": {
         "currency": "GBP",
         "declared_value": 30,
-        "paid_by": "sender",
+        "paid_by": "recipient",
     },
-    "incoterm": "DDP",
+    "incoterm": "DAP",
     "invoice": "INV-INTL-001",
     "invoice_date": "2026-05-15",
     "options": {},

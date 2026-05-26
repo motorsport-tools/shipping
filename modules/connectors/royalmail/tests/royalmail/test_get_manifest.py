@@ -24,7 +24,6 @@ class TestRoyalMailClickandDropGetManifest(unittest.TestCase):
         """Serialize a manifest lookup payload into the Royal Mail manifest identifier format."""
         request = fixture.gateway.mapper.create_get_manifest_request(self.GetManifestRequest)
 
-        print(f"Generated request: {request.serialize()}")
         self.assertEqual(request.serialize(), fixture.ManifestIdentifierRequest)
     
 
@@ -36,7 +35,6 @@ class TestRoyalMailClickandDropGetManifest(unittest.TestCase):
             request = fixture.gateway.mapper.create_get_manifest_request(self.GetManifestRequest)
             fixture.gateway.proxy.get_manifest(request)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/manifests/1001",
@@ -52,7 +50,6 @@ class TestRoyalMailClickandDropGetManifest(unittest.TestCase):
             response = fixture.gateway.proxy.get_manifest(request)
             parsed_response = list(fixture.gateway.mapper.parse_get_manifest_response(response))
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedGetManifestResponse,
@@ -68,7 +65,6 @@ class TestRoyalMailClickandDropGetManifest(unittest.TestCase):
             response = fixture.gateway.proxy.get_manifest(request)
             parsed_response = list(fixture.gateway.mapper.parse_get_manifest_response(response))
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedGetManifestErrorResponse,

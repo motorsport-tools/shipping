@@ -23,7 +23,6 @@ class TestRoyalMailClickandDropVersion(unittest.TestCase):
         """Build the empty request payload required by the version endpoint."""
         request = fixture.gateway.mapper.create_get_version_request(self.VersionRequest)
 
-        print(f"Generated request: {request.serialize()}")
         self.assertEqual(request.serialize(), fixture.VersionRequest)
 
     def test_get_version(self):
@@ -34,7 +33,6 @@ class TestRoyalMailClickandDropVersion(unittest.TestCase):
             request = fixture.gateway.mapper.create_get_version_request(self.VersionRequest)
             fixture.gateway.proxy.get_version(request)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/version",
@@ -49,7 +47,6 @@ class TestRoyalMailClickandDropVersion(unittest.TestCase):
             response = fixture.gateway.proxy.get_version(request)
             parsed_response = list(fixture.gateway.mapper.parse_get_version_response(response))
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedVersionResponse,
@@ -64,7 +61,6 @@ class TestRoyalMailClickandDropVersion(unittest.TestCase):
             response = fixture.gateway.proxy.get_version(request)
             parsed_response = list(fixture.gateway.mapper.parse_get_version_response(response))
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedVersionErrorResponse,

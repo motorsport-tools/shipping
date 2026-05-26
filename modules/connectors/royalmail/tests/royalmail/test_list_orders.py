@@ -24,7 +24,6 @@ class TestRoyalMailClickandDropListOrders(unittest.TestCase):
         """Serialize list-orders filters into the Royal Mail paging/query payload."""
         request = fixture.gateway.mapper.create_list_orders_request(self.ListOrdersRequest)
 
-        print(f"Generated request: {request.serialize()}")
         self.assertEqual(request.serialize(), fixture.OrdersLookupRequest)
 
     def test_list_orders(self):
@@ -35,7 +34,6 @@ class TestRoyalMailClickandDropListOrders(unittest.TestCase):
             request = fixture.gateway.mapper.create_list_orders_request(self.ListOrdersRequest)
             fixture.gateway.proxy.list_orders(request)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
             self.assertEqual(
                 mock.call_args[1]["url"],
                 f"{fixture.gateway.settings.server_url}/orders"
@@ -54,7 +52,6 @@ class TestRoyalMailClickandDropListOrders(unittest.TestCase):
             response = fixture.gateway.proxy.list_orders(request)
             parsed_response = list(fixture.gateway.mapper.parse_list_orders_response(response))
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedListOrdersResponse,
@@ -69,7 +66,6 @@ class TestRoyalMailClickandDropListOrders(unittest.TestCase):
             response = fixture.gateway.proxy.list_orders(request)
             parsed_response = list(fixture.gateway.mapper.parse_list_orders_response(response))
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
             self.assertListEqual(
                 lib.to_dict(parsed_response),
                 fixture.ParsedListOrdersErrorResponse,

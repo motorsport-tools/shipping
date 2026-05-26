@@ -19,7 +19,6 @@ class TestRoyalMailClickandDropReturnServices(unittest.TestCase):
             self.ReturnServicesRequest
         )
 
-        print(f"Generated request: {request.serialize()}")
 
         self.assertEqual(
             request.serialize(),
@@ -36,7 +35,6 @@ class TestRoyalMailClickandDropReturnServices(unittest.TestCase):
             )
             fixture.gateway.proxy.get_return_services(request)
 
-            print(f"Called URL: {mock.call_args[1]['url']}")
 
             self.assertEqual(
                 mock.call_args[1]["url"],
@@ -61,7 +59,6 @@ class TestRoyalMailClickandDropReturnServices(unittest.TestCase):
                 fixture.gateway.mapper.parse_get_return_services_response(response)
             )
 
-            print(f"Parsed response: {lib.to_dict(parsed_response)}")
 
             self.assertListEqual(
                 lib.to_dict(parsed_response),
@@ -81,7 +78,6 @@ class TestRoyalMailClickandDropReturnServices(unittest.TestCase):
                 fixture.gateway.mapper.parse_get_return_services_response(response)
             )
 
-            print(f"Error response: {lib.to_dict(parsed_response)}")
 
             self.assertListEqual(
                 lib.to_dict(parsed_response),
