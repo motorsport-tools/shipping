@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "LGPL-3.0"
 authors = [
-    {name = "karrio", email = "hello@karrio.io"}
+    {name = "ralsim", email = "richard.simcox@motorsport-tools.com"}
 ]
 classifiers = [
     "Intended Audience :: Developers",
