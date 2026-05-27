@@ -37,7 +37,7 @@ pip install -e ./modules/connectors/royalmail
 ### If packaged independently
 
 ```bash
-pip install karrio.royalmail
+pip install karrio_royalmail
 ```
 
 ---
@@ -141,18 +141,18 @@ Carrier-specific connection behavior can be configured through `settings.config`
 
 ### Supported connection config keys
 
-| Key                                | Type   | Default                                   | Description                                             |
-| ---------------------------------- | ------ | ----------------------------------------- | ------------------------------------------------------- |
-| `base_url`                         | `str`  | `https://api.parcel.royalmail.com/api/v1` | Click & Drop API base URL                               |
-| `tracking_base_url`                | `str`  | `https://api.royalmail.net`               | Tracking API base URL                                   |
-| `carrier_name`                     | `str`  | `None`                                    | Default carrier name sent in shipment/manifest requests |
-| `label_type`                       | `str`  | `PDF`                                     | Default label document type                             |
-| `include_label_in_response`        | `bool` | `True`                                    | Request label data during shipment creation             |
-| `include_return_label_in_response` | `bool` | `False`                                   | Request return label data by default                    |
-| `shipping_options`                 | `list` | `[]`                                      | Optional configured defaults                            |
-| `shipping_services`                | `list` | built-in catalog                          | Optional configured services                            |
-| `apply_uk_vat_to_rates` | `bool` | `False` | Force UK VAT gross-up on locally rated services unless service metadata disables VAT |
-| `uk_vat_rate_percentage` | `float` | `20.0` | VAT rate used when VAT is applied and no service-specific VAT rate is configured |
+| Key                                | Type   | Default                                   | Description                                                                          |
+| ---------------------------------- | ------ | ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| `click_and_drop_api_base_url`      | `str`  | `https://api.parcel.royalmail.com/api/v1` | Click & Drop API base URL                                                            |
+| `tracking_api_base_url`            | `str`  | `https://api.royalmail.net`               | Tracking API base URL                                                                |
+| `carrier_name`                     | `str`  | `None`                                    | Default carrier name sent in shipment/manifest requests                              |
+| `label_type`                       | `str`  | `PDF`                                     | Default label document type                                                          |
+| `include_label_in_response`        | `bool` | `True`                                    | Request label data during shipment creation                                          |
+| `include_return_label_in_response` | `bool` | `False`                                   | Request return label data by default                                                 |
+| `shipping_options`                 | `list` | `[]`                                      | Optional configured defaults                                                         |
+| `shipping_services`                | `list` | built-in catalog                          | Optional configured services                                                         |
+| `apply_uk_vat_to_rates`            | `bool` | `False`                                   | Force UK VAT gross-up on locally rated services unless service metadata disables VAT |
+| `uk_vat_rate_percentage`           | `float`| `20.0`                                    | VAT rate used when VAT is applied and no service-specific VAT rate is configured     |
 
 Example:
 
@@ -182,7 +182,7 @@ from karrio.mappers.royalmail.settings import Settings
 
 gateway = karrio.gateway["royalmail"].create(
     Settings(
-        api_key="YOUR_CLICK_AND_DROP_API_KEY",
+        click_and_drop_api_key="YOUR_CLICK_AND_DROP_API_KEY",
         tracking_client_id="YOUR_TRACKING_CLIENT_ID",          # optional unless tracking
         tracking_client_secret="YOUR_TRACKING_CLIENT_SECRET",  # optional unless tracking
         config={
@@ -649,12 +649,12 @@ For the authoritative enums, see:
 - `karrio.providers.royalmail.units.PackagingType`
 - `karrio.providers.royalmail.units.PackagePresets`
 
-| Use case | Catalogue used |
-|---|---|
-| Karrio rates/references/service enum | active services only |
-| Shipment metadata lookup, e.g. `serviceRegisterCode` | full CSV catalogue |
-| Return shipment selector resolution | full return catalogue by default |
-| Runtime `is_return_service()` | active return services only |
+| Use case                                             | Catalogue used                           |
+|------------------------------------------------------|------------------------------------------|
+| Karrio rates/references/service enum                 | active services only                     |
+| Shipment metadata lookup, e.g. `serviceRegisterCode` | full CSV catalogue                       |
+| Return shipment selector resolution                  | full return catalogue by default         |
+| Runtime `is_return_service()`                        | active return services only              |
 
 This matters for raw Royal Mail codes such as:
 
@@ -752,6 +752,19 @@ The connector filters returned rates by:
 - configured service whitelist
 - Royal Mail surcharge rules
 - optional VAT rules
+
+
+Shipment creation validates more than the Royal Mail API spec requires, as error handling on the royal mail API is useless to a user it simple states service OTA is not valid if selected with certain options and features or locals
+The code performs local validation for:
+
+package weight vs contents weight
+package format compatibility
+selected service compensation vs requested insurance
+DDP/DTP compatibility
+multi-package rules
+notification support
+configured service/option allowlists
+This is stricter than simply passing data to Click & Drop and letting Royal Mail reject it with a simple criptic error.
 
 Examples:
 
