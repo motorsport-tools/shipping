@@ -186,7 +186,7 @@ The connector maps Royal Mail dangerous-goods fields when supplied through shipm
 
 The connector performs basic value normalization only. Detailed dangerous-goods eligibility remains the responsibility of the Royal Mail account configuration, service rules, and Click & Drop API validation.
 
-- `dangerous_goods_quantity` is just an integer but surely it should be more than this (this might be a oversight on the royal mail api)
+- `dangerous_goods_description` is documented in the api spec as an integer but surely it should be more than this, so i've set it as a string (this might be a oversight on the royal mail api) unless they use set descriptions the store as ID's still yet to confirm this
 
 ## Tracking model
 
