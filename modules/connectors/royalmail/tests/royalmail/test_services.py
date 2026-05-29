@@ -362,47 +362,103 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
 
     def test_plugin_metadata_exposes_csv_service_levels(self):
         """
-        Expose the active CSV-backed service catalog through plugin metadata.
+        Expose the runtime active rate-backed service catalog through plugin metadata.
 
-        Karrio uses plugin.METADATA.service_levels to build carrier references
-        and default rate-table rows. Therefore inactive CSV rows must not be
-        exposed here, otherwise they appear in the Karrio rate table UI.
+        Royal Mail services can now come from two catalogue sources:
+
+        1. Active rows in services.csv.
+        2. Runtime-activated Parcelforce international sidecar rows generated from
+        parcelforce-international-services.csv.
+
+        Therefore plugin.METADATA.service_levels should not be limited to raw active
+        CSV rows only. It should expose active services with usable rate data, which
+        includes sidecar-activated Parcelforce services.
         """
         all_csv_rows_by_code = self._csv_rows_by_service_code()
+
         active_csv_rows_by_code = {
             service_code: row
             for service_code, row in all_csv_rows_by_code.items()
             if provider_units.service_is_active(row)
         }
+
         inactive_csv_codes = {
             service_code
             for service_code, row in all_csv_rows_by_code.items()
             if not provider_units.service_is_active(row)
         }
 
+        expected_runtime_services_by_code = {
+            service.service_code: service
+            for service in provider_units.ACTIVE_DEFAULT_SERVICES or []
+            if service.service_code
+            and any(
+                self._value(zone, "rate") not in [None, ""]
+                for zone in (getattr(service, "zones", None) or [])
+            )
+        }
+
         plugin_services_by_code = self._plugin_service_levels_by_code()
 
         self.assertEqual(plugin.METADATA.id, "royalmail")
-        self.assertEqual(set(plugin_services_by_code), set(active_csv_rows_by_code))
+        self.assertEqual(
+            set(plugin_services_by_code),
+            set(expected_runtime_services_by_code),
+        )
+
+        sidecar_activated_codes = {
+            service_code
+            for service_code in expected_runtime_services_by_code
+            if service_code in inactive_csv_codes
+        }
+
+        unexpected_inactive_csv_leaks = (
+            set(plugin_services_by_code)
+            & inactive_csv_codes
+            - sidecar_activated_codes
+        )
 
         self.assertFalse(
-            set(plugin_services_by_code) & inactive_csv_codes,
+            unexpected_inactive_csv_leaks,
             msg=(
-                "Inactive CSV services leaked into plugin metadata: "
-                f"{set(plugin_services_by_code) & inactive_csv_codes}"
+                "Inactive CSV services leaked into plugin metadata without being "
+                "activated by generated sidecar rate data: "
+                f"{unexpected_inactive_csv_leaks}"
             ),
         )
 
-        for service_code, row in active_csv_rows_by_code.items():
+        self.assertTrue(
+            sidecar_activated_codes,
+            msg=(
+                "Expected at least one sidecar-activated Parcelforce service to be "
+                "exposed through plugin metadata."
+            ),
+        )
+
+        for service_code, expected_service in expected_runtime_services_by_code.items():
             with self.subTest(service_code=service_code):
                 service = plugin_services_by_code[service_code]
 
-                self.assertEqual(self._value(service, "service_code"), row["service_code"])
-                self.assertEqual(self._value(service, "service_name"), row["service_name"])
+                self.assertEqual(
+                    self._value(service, "service_code"),
+                    expected_service.service_code,
+                )
                 self.assertEqual(
                     self._value(service, "carrier_service_code"),
-                    row.get("carrier_service_code") or row["service_code"],
+                    expected_service.carrier_service_code,
                 )
+
+                if service_code in active_csv_rows_by_code:
+                    row = active_csv_rows_by_code[service_code]
+
+                    self.assertEqual(
+                        self._value(service, "service_name"),
+                        row["service_name"],
+                    )
+                    self.assertEqual(
+                        self._value(service, "carrier_service_code"),
+                        row.get("carrier_service_code") or row["service_code"],
+                    )
 
     def test_plugin_metadata_service_levels_are_json_serializable(self):
         """Keep plugin metadata service levels JSON-safe for /v1/references."""

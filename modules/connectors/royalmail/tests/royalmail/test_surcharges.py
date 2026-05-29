@@ -3,6 +3,7 @@
 import copy
 import unittest
 
+import attr
 import karrio.core.models as models
 import karrio.lib as lib
 import karrio.mappers.royalmail.proxy as royalmail_proxy
@@ -481,4 +482,179 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
                 "active": True,
             },
             surcharges,
+        )
+
+    def test_parcelforce_oversized_surcharge_is_calculated_per_kg_over_threshold(self):
+        service = provider_units.SERVICE_LEVEL_BY_CODE["parcel_force_express_24"]
+
+        service = attr.evolve(
+            service,
+            max_weight=30.0,
+            metadata={
+                **(service.metadata or {}),
+                "oversized_surcharge_amount_per_kg": 10.00,
+                "oversized_surcharge_threshold_kg": 30.0,
+                "oversized_surcharge_rounding": "ceil",
+            },
+            surcharges=[],
+        )
+
+        rated_service = royalmail_proxy._with_active_royalmail_surcharges(
+            service,
+            surcharge_date=None,
+            options={},
+            parcel={
+                "weight": 35.0,
+                "weight_unit": "KG",
+            },
+        )
+
+        surcharges = lib.to_dict(rated_service.surcharges)
+
+        self.assertIn(
+            {
+                "id": "royalmail_parcelforce_oversized",
+                "name": "Parcelforce Oversized Surcharge",
+                "amount": 50.0,
+                "surcharge_type": "fixed",
+                "active": True,
+            },
+            surcharges,
+        )
+
+        # The original 30kg max should be relaxed for this rated parcel so the
+        # universal rating engine can return the base rate plus overweight surcharge.
+        self.assertEqual(rated_service.max_weight, 35.0)
+
+
+    def test_parcelforce_oversized_surcharge_is_not_added_at_threshold(self):
+        service = provider_units.SERVICE_LEVEL_BY_CODE["parcel_force_express_24"]
+
+        service = attr.evolve(
+            service,
+            max_weight=30.0,
+            metadata={
+                **(service.metadata or {}),
+                "oversized_surcharge_amount_per_kg": 10.00,
+                "oversized_surcharge_threshold_kg": 30.0,
+                "oversized_surcharge_rounding": "ceil",
+            },
+            surcharges=[],
+        )
+
+        rated_service = royalmail_proxy._with_active_royalmail_surcharges(
+            service,
+            surcharge_date=None,
+            options={},
+            parcel={
+                "weight": 30.0,
+                "weight_unit": "KG",
+            },
+        )
+
+        self.assertEqual(rated_service.surcharges, [])
+
+
+    def test_parcelforce_oversized_surcharge_supports_gram_weights(self):
+        service = provider_units.SERVICE_LEVEL_BY_CODE["parcel_force_express_24"]
+
+        service = attr.evolve(
+            service,
+            max_weight=30.0,
+            metadata={
+                **(service.metadata or {}),
+                "oversized_surcharge_amount_per_kg": 10.00,
+                "oversized_surcharge_threshold_kg": 30.0,
+                "oversized_surcharge_rounding": "ceil",
+            },
+            surcharges=[],
+        )
+
+        rated_service = royalmail_proxy._with_active_royalmail_surcharges(
+            service,
+            surcharge_date=None,
+            options={},
+            parcel={
+                "weight": 35000,
+                "weight_unit": "G",
+            },
+        )
+
+        charges = {
+            surcharge.name: surcharge.amount
+            for surcharge in rated_service.surcharges
+        }
+
+        self.assertEqual(
+            charges["Parcelforce Oversized Surcharge"],
+            50.0,
+        )
+
+
+    def test_rate_applies_parcelforce_oversized_surcharge_to_total(self):
+        service = provider_units.SERVICE_LEVEL_BY_CODE["parcel_force_express_24"]
+
+        # Force the normal max/zone max to 30kg to prove the oversized helper opens
+        # the top band for the rated parcel.
+        zones = [
+            attr.evolve(
+                zone,
+                max_weight=30.0,
+            )
+            for zone in service.zones or []
+        ]
+
+        service = attr.evolve(
+            service,
+            max_weight=30.0,
+            zones=zones,
+            metadata={
+                **(service.metadata or {}),
+                "oversized_surcharge_amount_per_kg": 10.00,
+                "oversized_surcharge_threshold_kg": 30.0,
+                "oversized_surcharge_rounding": "ceil",
+                "vat_applicable": False,
+            },
+            surcharges=[],
+        )
+
+        settings = attr.evolve(
+            fixture.gateway.settings,
+            services=[service],
+        )
+
+        payload = copy.deepcopy(fixture.RatePayload)
+        payload["services"] = [service.service_code]
+        payload["parcels"][0]["weight"] = 35.0
+        payload["parcels"][0]["weight_unit"] = "KG"
+
+        response = royalmail_proxy.Proxy(settings=settings).get_rates(
+            lib.Serializable(
+                models.RateRequest(**payload)
+            )
+        ).deserialize()
+
+        rates, messages = response[0][1]
+        rates = lib.to_dict(rates)
+        messages = lib.to_dict(messages)
+
+        self.assertEqual(messages, [])
+        self.assertEqual(len(rates), 1)
+
+        rate = rates[0]
+        charges = _charge_amounts(rate)
+
+        self.assertEqual(
+            charges["Parcelforce Oversized Surcharge"],
+            50.0,
+        )
+
+        expected_total = _money(
+            charges["Base Charge"]
+            + charges["Parcelforce Oversized Surcharge"]
+        )
+
+        self.assertEqual(
+            rate["total_charge"],
+            expected_total,
         )
