@@ -218,6 +218,39 @@ description: Forbidden (Feature not available)
 
 That /full endpoint is not available for normal Click & Drop / OBA accounts. It is ChannelShipper-only customers
 
+## Parcelforce International chargeable weight
+
+The Click & Drop API schema caps `ShipmentPackageRequest.weightInGrams` at `30000`.
+
+This does not mean Parcelforce International rating must reject all parcels whose chargeable rating weight exceeds `30kg`.
+
+For rating, Parcelforce International uses a chargeable weight concept. Chargeable weight should be the greatest of:
+
+1. Declared/pre-advised weight.
+2. Actual/measured weight when supplied.
+3. Volumetric weight.
+
+The default volumetric divisor is:
+
+```text
+5000 cm³/kg
+```
+
+Therefore:
+
+```text
+volumetric_weight_kg = length_cm * width_cm * height_cm / 5000
+```
+
+The connector should use this chargeable weight for:
+
+- selecting the local static rate band;
+- opening the synthetic `>30kg` Parcelforce rating band;
+- calculating the destination-specific “Surcharge per Additional kg after 30KG”.
+
+The connector should **not** use chargeable/volumetric weight as the Click & Drop `weightInGrams` value. Click & Drop order creation should continue to send the declared/pre-advised physical package weight from the Karrio parcel.
+
+
 ## Royal Mail surcharge and VAT implementation
 
 Royal Mail surcharges are implemented as data-driven service-level surcharges on top of Karrio's universal rating engine.
