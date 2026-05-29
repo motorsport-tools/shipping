@@ -1,1 +1,3 @@
 include karrio/providers/royalmail/services.csv
+include karrio/providers/royalmail/parcelforce-international-services.csv
+include karrio/providers/royalmail/royalmail-international-services.csv
