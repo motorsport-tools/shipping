@@ -766,6 +766,49 @@ notification support
 configured service/option allowlists
 This is stricter than simply passing data to Click & Drop and letting Royal Mail reject it with a simple criptic error.
 
+## Parcelforce International volumetric / chargeable-weight rating
+
+Click & Drop `ShipmentPackageRequest.weightInGrams` has a maximum of `30000` grams. This is the declared/pre-advised package weight sent to Royal Mail when creating the Click & Drop order.
+
+Parcelforce International rating is different: published tariffs can include an additional surcharge per kg after `30kg`. That threshold applies to the **chargeable rating weight**, which may be greater than the declared physical weight because Parcelforce uses volumetric weight.
+
+The connector should calculate rating weight as:
+
+```text
+chargeable_weight_kg = max(
+    declared/pre-advised weight,
+    actual/measured weight when supplied,
+    volumetric weight
+)
+```
+
+The default Parcelforce volumetric calculation is:
+
+```text
+volumetric_weight_kg = length_cm * width_cm * height_cm / 5000
+```
+
+Example:
+
+```text
+Pre-advised weight: 6kg
+Actual weight:      8kg
+Dimensions:         40cm x 30cm x 50cm
+
+Volumetric weight = 40 * 30 * 50 / 5000 = 12kg
+Chargeable weight = max(6, 8, 12) = 12kg
+```
+
+For irregularly shaped parcels, provide the dimensions of the smallest cubic/cuboid shape that the package fits into.
+
+Important distinction:
+
+- Shipment creation must still send `weightInGrams <= 30000`.
+- Local rating may use a chargeable/volumetric weight greater than `30kg`.
+- Parcelforce International additional-kg surcharges after `30kg` are applied to the chargeable rating weight, not strictly to the declared Click & Drop `weightInGrams`.
+```
+
+
 Examples:
 
 ```python
