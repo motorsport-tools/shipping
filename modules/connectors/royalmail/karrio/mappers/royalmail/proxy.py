@@ -1,5 +1,7 @@
 """Karrio Royal Mail Click and Drop client proxy."""
 
+import json
+import math
 import typing
 from urllib.parse import urlencode
 
@@ -1178,6 +1180,611 @@ def _weight_to_kg(value: typing.Any, unit: typing.Any) -> typing.Optional[float]
 
     return None
 
+def _parcel_weight_kg(parcel: typing.Any) -> typing.Optional[float]:
+    """Return the parcel weight in kilograms from a raw parcel/model object."""
+    if parcel is None:
+        return None
+
+    parcel_data = lib.to_dict(parcel, clear_empty=False)
+    source = parcel_data if isinstance(parcel_data, dict) else parcel
+
+    weight = _object_value(source, "weight")
+    unit = _object_value(source, "weight_unit", "weightUnit")
+
+    return _weight_to_kg(weight, unit)
+
+def _rate_request_destination_country_code(
+    rate_request: typing.Any,
+) -> typing.Optional[str]:
+    """Return the destination country code from a RateRequest-like object."""
+    if rate_request is None:
+        return None
+
+    request_data = lib.to_dict(rate_request, clear_empty=False)
+    source = request_data if isinstance(request_data, dict) else rate_request
+
+    recipient = _object_value(
+        source,
+        "recipient",
+        "ship_to",
+        "shipTo",
+        "destination",
+        "to",
+    )
+
+    if recipient is None:
+        return None
+
+    country_code = _object_value(
+        recipient,
+        "country_code",
+        "countryCode",
+        "country",
+    )
+
+    if country_code in [None, ""]:
+        return None
+
+    return str(country_code).strip().upper()
+
+
+def _metadata_number_mapping(
+    metadata: dict,
+    *keys: str,
+) -> typing.Dict[str, float]:
+    """
+    Read a metadata JSON/dict mapping and normalize values to floats.
+
+    Used for destination-specific Parcelforce overweight rates, e.g.
+
+        metadata[
+            "oversized_surcharge_amount_per_kg_by_country"
+        ] = '{"DZ":10.0,"CA":4.43}'
+    """
+    if not isinstance(metadata, dict):
+        return {}
+
+    for key in keys:
+        value = metadata.get(key)
+
+        if value in [None, ""]:
+            continue
+
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+
+        if not isinstance(value, dict):
+            continue
+
+        result = {}
+
+        for map_key, map_value in value.items():
+            amount = _number_or_none(map_value)
+
+            if amount is None:
+                continue
+
+            result[str(map_key).strip().upper()] = amount
+
+        return result
+
+    return {}
+
+def _royalmail_oversized_surcharge_rate_per_kg(
+    metadata: dict,
+    destination_country_code: typing.Optional[str] = None,
+) -> typing.Optional[float]:
+    """
+    Return the configured Parcelforce oversized surcharge rate per kg.
+
+    Priority:
+    1. Destination-specific country map from services.csv meta column.
+    2. Legacy scalar service-level surcharge amount.
+
+    This is required because Parcelforce international additional-kg rates vary
+    by destination.
+    """
+    country_code = (
+        str(destination_country_code).strip().upper()
+        if destination_country_code not in [None, ""]
+        else None
+    )
+
+    by_country = _metadata_number_mapping(
+        metadata,
+        "oversized_surcharge_amount_per_kg_by_country",
+        "parcelforce_oversized_surcharge_amount_per_kg_by_country",
+        "meta_oversized_surcharge_amount_per_kg_by_country",
+    )
+
+    if country_code is not None and by_country:
+        return by_country.get(country_code)
+
+    return _metadata_amount(
+        metadata,
+        "oversized_surcharge_amount_per_kg",
+        "oversize_surcharge_amount_per_kg",
+        "parcelforce_oversized_surcharge_amount_per_kg",
+        "parcelforce_oversize_surcharge_amount_per_kg",
+    )
+
+
+def _royalmail_oversized_surcharge_threshold_kg(metadata: dict) -> float:
+    """Return the Parcelforce oversized surcharge threshold in kg."""
+    threshold = _metadata_amount(
+        metadata,
+        "oversized_surcharge_threshold_kg",
+        "oversize_surcharge_threshold_kg",
+        "parcelforce_oversized_surcharge_threshold_kg",
+        "parcelforce_oversize_surcharge_threshold_kg",
+    )
+
+    if threshold is not None:
+        return threshold
+
+    return provider_units.ROYALMAIL_PARCELFORCE_OVERSIZED_WEIGHT_THRESHOLD_KG
+
+
+def _royalmail_oversized_surcharge_max_weight_kg(
+    metadata: dict,
+) -> typing.Optional[float]:
+    """
+    Return the absolute maximum overweight parcel weight in kg.
+
+    If this is not configured, the proxy will allow the currently rated parcel
+    through and apply the per-kg surcharge. If Royal Mail/Parcelforce gives you
+    a hard cap, configure this in services.csv.
+    """
+    return _metadata_amount(
+        metadata,
+        "oversized_surcharge_max_weight_kg",
+        "oversize_surcharge_max_weight_kg",
+        "parcelforce_oversized_surcharge_max_weight_kg",
+        "parcelforce_oversize_surcharge_max_weight_kg",
+    )
+
+
+def _royalmail_oversized_chargeable_kg(
+    excess_kg: float,
+    rounding: typing.Any = None,
+) -> float:
+    """
+    Convert excess weight into chargeable kg units.
+
+    Default is ceil because carrier weight surcharges are commonly charged per
+    started kg. Use services.csv `oversized_surcharge_rounding=exact` if you
+    need decimal prorating.
+    """
+    if excess_kg <= 0:
+        return 0.0
+
+    mode = str(rounding or "ceil").strip().lower()
+
+    if mode in ["exact", "decimal", "none"]:
+        return excess_kg
+
+    if mode in ["floor", "whole", "completed_kg"]:
+        return float(math.floor(excess_kg))
+
+    if mode in ["round", "nearest"]:
+        return float(round(excess_kg))
+
+    # Default: per started kg.
+    return float(math.ceil(excess_kg))
+
+def _royalmail_oversized_surcharge(
+    service: models.ServiceLevel,
+    parcel: typing.Any,
+    destination_country_code: typing.Optional[str] = None,
+) -> typing.Optional[models.Surcharge]:
+    """
+    Build the runtime Parcelforce oversized surcharge for one parcel.
+
+    Karrio's universal rating surcharge model only supports `fixed` and
+    `percentage`. Therefore, a weight-based surcharge must be calculated here
+    and injected as a fixed surcharge for the current parcel.
+
+    Example:
+        weight = 35kg
+        threshold = 30kg
+        rate_per_kg = 10
+        excess = 5kg
+        surcharge = 50
+    """
+    metadata = getattr(service, "metadata", {}) or {}
+
+    if not isinstance(metadata, dict):
+        return None
+
+    rate_per_kg = _royalmail_oversized_surcharge_rate_per_kg(
+        metadata,
+        destination_country_code=destination_country_code,
+    )
+
+    if rate_per_kg in [None, 0]:
+        return None
+
+    weight_kg = _parcel_weight_kg(parcel)
+
+    if weight_kg is None:
+        return None
+
+    threshold_kg = _royalmail_oversized_surcharge_threshold_kg(metadata)
+
+    if weight_kg <= threshold_kg:
+        return None
+
+    max_weight_kg = _royalmail_oversized_surcharge_max_weight_kg(metadata)
+
+    if max_weight_kg is not None and weight_kg > max_weight_kg:
+        return None
+
+    rounding = metadata.get("oversized_surcharge_rounding") or "ceil"
+    excess_kg = weight_kg - threshold_kg
+    chargeable_kg = _royalmail_oversized_chargeable_kg(excess_kg, rounding)
+    amount = round(chargeable_kg * float(rate_per_kg), 2)
+
+    if amount <= 0:
+        return None
+
+    return models.Surcharge(
+        id=provider_units.ROYALMAIL_PARCELFORCE_OVERSIZED_SURCHARGE_ID,
+        name="Parcelforce Oversized Surcharge",
+        amount=amount,
+        surcharge_type="fixed",
+        active=True,
+    )
+
+def _royalmail_oversized_rating_target_max_weight_kg(
+    service: models.ServiceLevel,
+    parcel: typing.Any,
+    destination_country_code: typing.Optional[str] = None,
+) -> typing.Optional[float]:
+    """
+    Return the max weight to expose to universal rating for overweight pricing.
+
+    Without this, services whose normal max_weight is 30kg would be rejected
+    before the oversized surcharge can be applied.
+    """
+    metadata = getattr(service, "metadata", {}) or {}
+
+    if not isinstance(metadata, dict):
+        return None
+
+    rate_per_kg = _royalmail_oversized_surcharge_rate_per_kg(
+        metadata,
+        destination_country_code=destination_country_code,
+    )
+
+    if rate_per_kg in [None, 0]:
+        return None
+
+    weight_kg = _parcel_weight_kg(parcel)
+
+    if weight_kg is None:
+        return None
+
+    threshold_kg = _royalmail_oversized_surcharge_threshold_kg(metadata)
+
+    if weight_kg <= threshold_kg:
+        return None
+
+    max_weight_kg = _royalmail_oversized_surcharge_max_weight_kg(metadata)
+
+    if max_weight_kg is not None:
+        if weight_kg > max_weight_kg:
+            return None
+
+        return max_weight_kg
+
+    return weight_kg
+
+def _zone_matches_destination_country_code(
+    zone: models.ServiceZone,
+    destination_country_code: typing.Optional[str],
+) -> bool:
+    """
+    Return whether a ServiceZone is compatible with the destination country.
+
+    Empty country_codes means a catch-all zone in Karrio universal rating.
+    Prefer exact country zones when available, but allow catch-all fallback.
+    """
+    if destination_country_code in [None, ""]:
+        return True
+
+    country_code = str(destination_country_code).strip().upper()
+    zone_country_codes = [
+        str(code).strip().upper()
+        for code in (getattr(zone, "country_codes", None) or [])
+        if str(code).strip()
+    ]
+
+    if not any(zone_country_codes):
+        return True
+
+    return country_code in zone_country_codes
+
+
+def _zone_destination_specificity(
+    zone: models.ServiceZone,
+    destination_country_code: typing.Optional[str],
+) -> int:
+    """
+    Score a zone for destination matching.
+
+    Exact destination-country zones should be preferred over catch-all zones.
+    """
+    if destination_country_code in [None, ""]:
+        return 0
+
+    country_code = str(destination_country_code).strip().upper()
+    zone_country_codes = [
+        str(code).strip().upper()
+        for code in (getattr(zone, "country_codes", None) or [])
+        if str(code).strip()
+    ]
+
+    if country_code in zone_country_codes:
+        return 2
+
+    if not any(zone_country_codes):
+        return 1
+
+    return 0
+
+
+def _royalmail_oversized_top_rate_zone(
+    zones: typing.Iterable[models.ServiceZone],
+    threshold_kg: float,
+    target_max_weight_kg: float,
+    destination_country_code: typing.Optional[str] = None,
+) -> typing.Optional[models.ServiceZone]:
+    """
+    Return the published top-band zone to reuse for Parcelforce overweight rating.
+
+    Example:
+        Published sidecar band:
+            29-30kg, DE, £22.44
+
+        Runtime overweight parcel:
+            35kg
+
+        We reuse the 29-30kg rate as the base charge and add the
+        additional-per-kg surcharge separately.
+    """
+    epsilon = 0.000001
+    candidates = []
+
+    for zone in zones or []:
+        zone_min_weight = _number_or_none(getattr(zone, "min_weight", None))
+        zone_max_weight = _number_or_none(getattr(zone, "max_weight", None))
+        zone_rate = _number_or_none(getattr(zone, "rate", None))
+
+        if zone_min_weight is None or zone_max_weight is None:
+            continue
+
+        if zone_rate is None:
+            continue
+
+        if not _zone_matches_destination_country_code(
+            zone,
+            destination_country_code,
+        ):
+            continue
+
+        if not (
+            zone_min_weight <= threshold_kg <= zone_max_weight + epsilon
+            and zone_max_weight < target_max_weight_kg + epsilon
+        ):
+            continue
+
+        candidates.append(
+            (
+                _zone_destination_specificity(zone, destination_country_code),
+                zone_min_weight,
+                zone_max_weight,
+                zone,
+            )
+        )
+
+    if not any(candidates):
+        return None
+
+    # Prefer:
+    # 1. Exact country match over catch-all.
+    # 2. Highest min_weight, i.e. the actual top published band.
+    # 3. Highest max_weight.
+    return max(
+        candidates,
+        key=lambda item: (
+            item[0],
+            item[1],
+            item[2],
+        ),
+    )[3]
+
+ROYALMAIL_UNIVERSAL_RATING_WEIGHT_EPSILON_KG = 0.01
+
+
+def _universal_rating_exclusive_max_weight_kg(
+    weight_kg: typing.Optional[float],
+) -> typing.Optional[float]:
+    """
+    Return an exclusive max-weight boundary that survives Karrio's 2-decimal
+    Weight normalization.
+
+    Karrio universal rating checks ServiceZone max_weight as exclusive:
+
+        package_weight < zone.max_weight
+
+    But units.Weight(...).value rounds to 2 decimals by default. Therefore:
+
+        35.000001kg -> 35.0kg
+
+    which makes a 35kg package fail:
+
+        35.0 >= 35.0
+
+    Use +0.01kg so the upper bound remains above the package weight after
+    Karrio's normalization:
+
+        35.01kg -> 35.01kg
+    """
+    if weight_kg is None:
+        return None
+
+    return round(float(weight_kg) + ROYALMAIL_UNIVERSAL_RATING_WEIGHT_EPSILON_KG, 2)
+def _with_royalmail_oversized_rating_limits(
+    service: models.ServiceLevel,
+    parcel: typing.Any,
+    destination_country_code: typing.Optional[str] = None,
+) -> models.ServiceLevel:
+    """
+    Return a service copy whose rating limits allow an overweight parcel.
+
+    Parcelforce international sidecar pricing publishes base price bands up to
+    30kg, plus a destination-specific surcharge per additional kg after 30kg.
+
+    Karrio universal rating requires a matching ServiceZone before it returns a
+    rate. For overweight Parcelforce parcels, create a runtime-only synthetic
+    overweight zone that reuses the published 29-30kg top-band rate.
+
+    Important:
+    Karrio universal rating treats zone max_weight as exclusive and rounds
+    Weight values to 2 decimals. Therefore, a synthetic 35.000001kg max becomes
+    35.0kg internally and does not match a 35kg parcel. Use 35.01kg instead.
+    """
+    target_max_weight_kg = _royalmail_oversized_rating_target_max_weight_kg(
+        service,
+        parcel,
+        destination_country_code=destination_country_code,
+    )
+
+    if target_max_weight_kg is None:
+        return service
+
+    metadata = getattr(service, "metadata", {}) or {}
+    threshold_kg = _royalmail_oversized_surcharge_threshold_kg(metadata)
+    current_max_weight = _number_or_none(getattr(service, "max_weight", None))
+
+    target_zone_max_weight = _universal_rating_exclusive_max_weight_kg(
+        target_max_weight_kg
+    )
+
+    if target_zone_max_weight is None:
+        return service
+
+    new_max_weight = getattr(service, "max_weight", None)
+
+    if current_max_weight is not None and current_max_weight < target_max_weight_kg:
+        # Relax the service-level max weight to the actual rated parcel weight.
+        #
+        # Do not use target_zone_max_weight here. The +0.01kg boundary is only
+        # needed for ServiceZone.max_weight because Karrio universal rating
+        # treats zone max weights as exclusive.
+        #
+        # ServiceLevel.max_weight should remain semantically accurate:
+        #   35kg parcel -> service.max_weight = 35.0
+        new_max_weight = target_max_weight_kg
+
+    original_zones = list(getattr(service, "zones", []) or [])
+
+    top_rate_zone = _royalmail_oversized_top_rate_zone(
+        original_zones,
+        threshold_kg=threshold_kg,
+        target_max_weight_kg=target_max_weight_kg,
+        destination_country_code=destination_country_code,
+    )
+
+    expanded_zones = list(original_zones)
+
+    if top_rate_zone is not None:
+        zone_id = getattr(top_rate_zone, "id", None)
+        overweight_zone_id = (
+            f"{zone_id}_over_{int(threshold_kg)}kg"
+            if zone_id not in [None, ""]
+            else None
+        )
+
+        already_has_runtime_zone = any(
+            getattr(zone, "id", None) == overweight_zone_id
+            and _number_or_none(getattr(zone, "min_weight", None)) == threshold_kg
+            and _number_or_none(getattr(zone, "max_weight", None)) == target_zone_max_weight
+            for zone in expanded_zones
+        )
+
+        if not already_has_runtime_zone:
+            expanded_zones.append(
+                attr.evolve(
+                    top_rate_zone,
+                    id=overweight_zone_id,
+                    min_weight=threshold_kg,
+                    max_weight=target_zone_max_weight,
+                )
+            )
+
+    else:
+        # Fallback to the previous behaviour: stretch any zone whose range
+        # contains the surcharge threshold. This keeps legacy/scalar oversized
+        # services working even if no destination-specific top band was found.
+        expanded_zones = []
+
+        for zone in original_zones:
+            zone_min_weight = _number_or_none(getattr(zone, "min_weight", None))
+            zone_max_weight = _number_or_none(getattr(zone, "max_weight", None))
+
+            if zone_max_weight is None:
+                expanded_zones.append(zone)
+                continue
+
+            zone_min_weight = zone_min_weight or 0.0
+
+            if (
+                zone_min_weight <= threshold_kg <= zone_max_weight + 0.000001
+                and zone_max_weight < target_zone_max_weight
+            ):
+                expanded_zones.append(
+                    attr.evolve(
+                        zone,
+                        max_weight=target_zone_max_weight,
+                    )
+                )
+                continue
+
+            expanded_zones.append(zone)
+
+    return attr.evolve(
+        service,
+        weight_unit="KG",
+        max_weight=new_max_weight,
+        zones=expanded_zones,
+    )
+
+def _rate_package_reference(
+    original_parcel: typing.Any,
+    rating_parcel: typing.Any,
+    index: int,
+) -> str:
+    """Return a stable package reference when rating parcels one at a time."""
+    for parcel in [original_parcel, rating_parcel]:
+        parcel_data = lib.to_dict(parcel, clear_empty=False)
+        source = parcel_data if isinstance(parcel_data, dict) else parcel
+
+        reference = _object_value(
+            source,
+            "id",
+            "reference",
+            "parcel_id",
+            "parcelId",
+        )
+
+        if reference not in [None, ""]:
+            return str(reference)
+
+    return str(index + 1)
 
 def _dimension_to_cm(value: typing.Any, unit: typing.Any) -> typing.Optional[float]:
     """Convert a dimension value from its source unit to centimetres."""
@@ -1338,22 +1945,29 @@ def _rate_request_surcharge_date(rate_request: typing.Any) -> typing.Any:
         )
     )
 
-
 def _with_active_royalmail_surcharges(
     service: models.ServiceLevel,
     surcharge_date: typing.Any,
     options: typing.Any = None,
+    parcel: typing.Any = None,
+    destination_country_code: typing.Optional[str] = None,
 ) -> models.ServiceLevel:
     """
     Return a service copy with:
 
     1. Date-active Royal Mail surcharges, such as Peak.
     2. Option-triggered feature surcharges, such as Signature on delivery.
+    3. Parcel-specific Parcelforce oversized surcharge.
 
-    Important:
-    Feature/accessorial prices are not always-on service surcharges.
-    They are only appended when the Karrio option is selected.
+    The Parcelforce oversized surcharge may be destination-specific for
+    international Parcelforce services.
     """
+    service = _with_royalmail_oversized_rating_limits(
+        service,
+        parcel,
+        destination_country_code=destination_country_code,
+    )
+
     metadata = getattr(service, "metadata", {}) or {}
 
     peak_start_date = (
@@ -1379,17 +1993,33 @@ def _with_active_royalmail_surcharges(
         options or {},
     )
 
+    oversized_surcharge = _royalmail_oversized_surcharge(
+        service,
+        parcel,
+        destination_country_code=destination_country_code,
+    )
+
+    dynamic_surcharges = []
+
+    if oversized_surcharge is not None and not any(
+        surcharge.id == oversized_surcharge.id
+        for surcharge in active_surcharges
+    ):
+        dynamic_surcharges.append(oversized_surcharge)
+
     return attr.evolve(
         service,
         surcharges=[
             *active_surcharges,
             *option_surcharges,
+            *dynamic_surcharges,
         ],
     )
 
 def _settings_for_universal_rating(
     settings: provider_settings.Settings,
     rate_request: typing.Any = None,
+    parcel: typing.Any = None,
 ) -> provider_settings.Settings:
     """
     Return a copy of settings with Royal Mail service dimensions normalized for
@@ -1401,6 +2031,13 @@ def _settings_for_universal_rating(
         service.metadata.signature_surcharge_amount = 2.00
         -> add GBP 2.00 Signature on delivery to the local rate.
 
+    It also injects parcel-specific Parcelforce oversized surcharges, e.g.:
+
+        parcel.weight = 35kg
+        service.metadata.oversized_surcharge_threshold_kg = 30
+        service.metadata.oversized_surcharge_amount_per_kg = 10
+        -> add GBP 50.00 Parcelforce Oversized Surcharge
+
     Important:
     Use settings.shipping_services instead of settings.services so local rating
     respects connection-level `config.shipping_services` whitelists while still
@@ -1408,6 +2045,7 @@ def _settings_for_universal_rating(
     """
     surcharge_date = _rate_request_surcharge_date(rate_request)
     options = _request_value(rate_request, "options", {}) or {}
+    destination_country_code = _rate_request_destination_country_code(rate_request)
 
     runtime_services = getattr(settings, "shipping_services", None)
 
@@ -1427,6 +2065,8 @@ def _settings_for_universal_rating(
                     service,
                     surcharge_date,
                     options=options,
+                    parcel=parcel,
+                    destination_country_code=destination_country_code,
                 )
             )
             for service in list(runtime_services or [])
@@ -2696,25 +3336,113 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
     settings: provider_settings.Settings
 
     def get_rates(self, request: lib.Serializable) -> lib.Deserializable[dict]:
-        """Rate Royal Mail services locally using Karrio universal rating tables."""
+        """
+        Rate Royal Mail services locally using Karrio universal rating tables.
+
+        The Parcelforce oversized surcharge is parcel-specific, so multi-piece
+        requests are rated one parcel at a time with parcel-specific service copies.
+        This prevents a 35kg parcel surcharge being incorrectly applied to a 5kg
+        parcel in the same request.
+        """
         original_rate_request = request.serialize()
 
         service_normalized_request = _normalize_rate_request_services_for_rating(
             original_rate_request
         )
 
-        normalized_request = lib.Serializable(
-            _normalize_rate_request_for_universal_rating(
-                service_normalized_request
-            )
+        request_data = lib.to_dict(
+            service_normalized_request,
+            clear_empty=False,
+        )
+        original_request_data = lib.to_dict(
+            original_rate_request,
+            clear_empty=False,
         )
 
-        response = rating_proxy.RatingMixinProxy(
-            settings=_settings_for_universal_rating(
-                self.settings,
-                rate_request=original_rate_request,
-            ),
-        ).get_rates(normalized_request).deserialize()
+        service_parcels = (
+            request_data.get("parcels")
+            if isinstance(request_data, dict)
+            else None
+        ) or []
+
+        original_parcels = (
+            original_request_data.get("parcels")
+            if isinstance(original_request_data, dict)
+            else None
+        ) or service_parcels
+
+        # Single parcel / empty parcel fallback keeps the previous behaviour while
+        # still passing the parcel into settings so the overweight surcharge works.
+        if not isinstance(service_parcels, list) or len(service_parcels) <= 1:
+            parcel = (
+                original_parcels[0]
+                if isinstance(original_parcels, list) and len(original_parcels) > 0
+                else None
+            )
+
+            normalized_request = lib.Serializable(
+                _normalize_rate_request_for_universal_rating(
+                    service_normalized_request
+                )
+            )
+
+            response = rating_proxy.RatingMixinProxy(
+                settings=_settings_for_universal_rating(
+                    self.settings,
+                    rate_request=original_rate_request,
+                    parcel=parcel,
+                ),
+            ).get_rates(normalized_request).deserialize()
+
+            return lib.Deserializable(
+                _filter_package_rates_by_package_format(
+                    response,
+                    original_rate_request,
+                    self.settings,
+                )
+            )
+
+        response = []
+
+        for index, service_parcel in enumerate(service_parcels):
+            original_parcel = (
+                original_parcels[index]
+                if isinstance(original_parcels, list) and index < len(original_parcels)
+                else service_parcel
+            )
+
+            parcel_request_data = {
+                **request_data,
+                "parcels": [service_parcel],
+            }
+
+            normalized_request = lib.Serializable(
+                _normalize_rate_request_for_universal_rating(
+                    models.RateRequest(**parcel_request_data)
+                )
+            )
+
+            parcel_response = rating_proxy.RatingMixinProxy(
+                settings=_settings_for_universal_rating(
+                    self.settings,
+                    rate_request=original_rate_request,
+                    parcel=original_parcel,
+                ),
+            ).get_rates(normalized_request).deserialize()
+
+            package_reference = _rate_package_reference(
+                original_parcel,
+                service_parcel,
+                index,
+            )
+
+            for _, package_result in parcel_response:
+                response.append(
+                    (
+                        package_reference,
+                        package_result,
+                    )
+                )
 
         return lib.Deserializable(
             _filter_package_rates_by_package_format(

@@ -1,5 +1,8 @@
+import ast
+import collections.abc
 import csv
 import datetime
+import json
 import pathlib
 import re
 import typing
@@ -7,9 +10,22 @@ import typing
 import karrio.lib as lib
 import karrio.core.models as models
 import karrio.core.units as units
+import karrio.providers.royalmail.parcelforce_international as parcelforce_international
+import karrio.providers.royalmail.royalmail_international as royalmail_international
+
 
 
 SERVICES_CSV = pathlib.Path(__file__).resolve().parent / "services.csv"
+
+PARCELFORCE_INTERNATIONAL_SERVICES_CSV = (
+    pathlib.Path(__file__).resolve().parent
+    / "parcelforce-international-services.csv"
+)
+
+ROYALMAIL_INTERNATIONAL_SERVICES_CSV = (
+    pathlib.Path(__file__).resolve().parent
+    / "royalmail-international-services.csv"
+)
 
 _SERVICE_CODE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -139,7 +155,6 @@ def _to_list(value: typing.Any) -> typing.List[str]:
         for item in re.split(r"[,;|:]+", str(value))
         if item.strip()
     ]
-
 # ---------------------------------------------------------------------------
 # Royal Mail UK domestic surcharges
 # ---------------------------------------------------------------------------
@@ -148,6 +163,19 @@ ROYALMAIL_FUEL_ENERGY_SURCHARGE_ID = "royalmail_fuel_energy"
 ROYALMAIL_PARCELFORCE_FUEL_ENERGY_SURCHARGE_ID = "royalmail_parcelforce_fuel_energy"
 ROYALMAIL_GREEN_SURCHARGE_ID = "royalmail_green"
 ROYALMAIL_PEAK_SURCHARGE_ID = "royalmail_peak"
+
+# Dynamic Parcelforce overweight / oversized surcharge.
+#
+# This is not loaded directly into ServiceLevel.surcharges from services.csv,
+# because the final charge depends on the rated parcel weight.
+#
+# Example:
+#   weight = 35kg
+#   threshold = 30kg
+#   amount_per_kg = 10
+#   surcharge = (35 - 30) * 10 = 50
+ROYALMAIL_PARCELFORCE_OVERSIZED_SURCHARGE_ID = "royalmail_parcelforce_oversized"
+ROYALMAIL_PARCELFORCE_OVERSIZED_WEIGHT_THRESHOLD_KG = 30.0
 
 ROYALMAIL_SIGNATURE_SURCHARGE_ID = "royalmail_signature_on_delivery"
 ROYALMAIL_AGE_VERIFICATION_SURCHARGE_ID = "royalmail_age_verification"
@@ -158,6 +186,7 @@ ROYALMAIL_SURCHARGE_IDS = {
     ROYALMAIL_PARCELFORCE_FUEL_ENERGY_SURCHARGE_ID,
     ROYALMAIL_GREEN_SURCHARGE_ID,
     ROYALMAIL_PEAK_SURCHARGE_ID,
+    ROYALMAIL_PARCELFORCE_OVERSIZED_SURCHARGE_ID,
 }
 
 # Royal Mail published UK domestic peak window:
@@ -1605,8 +1634,47 @@ def _service_metadata(row: dict) -> dict:
         else inferred_return_service
     )
 
-    raw_weight_unit = _row_value(row, "weight_unit")
-    raw_dimension_unit = _row_value(row, "dimension_unit")
+    raw_weight_unit = _row_value(
+        row,
+        "carrier_weight_unit",
+        "weight_unit",
+    )
+
+    raw_dimension_unit = _row_value(
+        row,
+        "carrier_dimension_unit",
+        "dimension_unit",
+    )
+
+    raw_carrier_min_weight = _row_value(
+        row,
+        "carrier_min_weight",
+        "min_weight",
+    )
+
+    raw_carrier_max_weight = _row_value(
+        row,
+        "carrier_max_weight",
+        "max_weight",
+    )
+
+    raw_carrier_max_length = _row_value(
+        row,
+        "carrier_max_length",
+        "max_length",
+    )
+
+    raw_carrier_max_width = _row_value(
+        row,
+        "carrier_max_width",
+        "max_width",
+    )
+
+    raw_carrier_max_height = _row_value(
+        row,
+        "carrier_max_height",
+        "max_height",
+    )
 
     explicit_package_format = _row_value(
         row,
@@ -1697,13 +1765,18 @@ def _service_metadata(row: dict) -> dict:
         "return_service": is_return_service,
 
         # Preserve carrier-native CSV units/limits for transparency.
+        #
+        # For generated Parcelforce sidecar rows, `weight_unit`, `min_weight`,
+        # and `max_weight` are normalized to KG for Karrio rating because the
+        # sidecar table is in kilograms. The original services.csv carrier
+        # values are carried in `carrier_*` fields and should be exposed here.
         "carrier_weight_unit": raw_weight_unit,
         "carrier_dimension_unit": raw_dimension_unit,
-        "carrier_min_weight": _to_float(_row_value(row, "min_weight")),
-        "carrier_max_weight": _to_float(_row_value(row, "max_weight")),
-        "carrier_max_length": _to_float(_row_value(row, "max_length")),
-        "carrier_max_width": _to_float(_row_value(row, "max_width")),
-        "carrier_max_height": _to_float(_row_value(row, "max_height")),
+        "carrier_min_weight": _to_float(raw_carrier_min_weight),
+        "carrier_max_weight": _to_float(raw_carrier_max_weight),
+        "carrier_max_length": _to_float(raw_carrier_max_length),
+        "carrier_max_width": _to_float(raw_carrier_max_width),
+        "carrier_max_height": _to_float(raw_carrier_max_height),
 
         # Royal Mail UK domestic surcharge transparency. The actual ChargeDetails
         # are built from ServiceLevel.surcharges by Karrio universal rating.
@@ -1716,6 +1789,74 @@ def _service_metadata(row: dict) -> dict:
         "peak_surcharge_end_date": _row_value(row, "peak_surcharge_end_date"),
         "surcharge_notes": _row_value(row, "surcharge_notes"),
 
+        # Parcelforce overweight / oversized surcharge.
+        #
+        # These are metadata only. The actual Karrio Surcharge is calculated
+        # dynamically in the proxy because it depends on the rated parcel weight.
+        #
+        # Supported services.csv aliases:
+        #   oversized_surcharge_amount_per_kg
+        #   oversize_surcharge_amount_per_kg
+        #   parcelforce_oversized_surcharge_amount_per_kg
+        #   parcelforce_oversize_surcharge_amount_per_kg
+        #
+        #   oversized_surcharge_threshold_kg
+        #   oversize_surcharge_threshold_kg
+        #   parcelforce_oversized_surcharge_threshold_kg
+        #   parcelforce_oversize_surcharge_threshold_kg
+        #
+        #   oversized_surcharge_max_weight_kg
+        #   oversize_surcharge_max_weight_kg
+        #   parcelforce_oversized_surcharge_max_weight_kg
+        #   parcelforce_oversize_surcharge_max_weight_kg
+        #
+        #   oversized_surcharge_rounding
+        #   oversize_surcharge_rounding
+        #   parcelforce_oversized_surcharge_rounding
+        #   parcelforce_oversize_surcharge_rounding
+        #
+        # Rounding:
+        #   ceil  -> charge each started kg over the threshold, default
+        #   exact -> charge the exact decimal kg over the threshold
+        #   floor -> charge whole completed kg only
+        #   round -> round excess kg using Python round()
+        "oversized_surcharge_amount_per_kg": _to_float(
+            _row_value(
+                row,
+                "oversized_surcharge_amount_per_kg",
+                "oversize_surcharge_amount_per_kg",
+                "parcelforce_oversized_surcharge_amount_per_kg",
+                "parcelforce_oversize_surcharge_amount_per_kg",
+            )
+        ),
+        "oversized_surcharge_threshold_kg": _to_float(
+            _row_value(
+                row,
+                "oversized_surcharge_threshold_kg",
+                "oversize_surcharge_threshold_kg",
+                "parcelforce_oversized_surcharge_threshold_kg",
+                "parcelforce_oversize_surcharge_threshold_kg",
+            )
+        ),
+        "oversized_surcharge_max_weight_kg": _to_float(
+            _row_value(
+                row,
+                "oversized_surcharge_max_weight_kg",
+                "oversize_surcharge_max_weight_kg",
+                "parcelforce_oversized_surcharge_max_weight_kg",
+                "parcelforce_oversize_surcharge_max_weight_kg",
+            )
+        ),
+        "oversized_surcharge_rounding": (
+            _row_value(
+                row,
+                "oversized_surcharge_rounding",
+                "oversize_surcharge_rounding",
+                "parcelforce_oversized_surcharge_rounding",
+                "parcelforce_oversize_surcharge_rounding",
+            )
+            or "ceil"
+        ),
         # Royal Mail optional feature/accessorial charges.
         #
         # These are not added to ServiceLevel.surcharges at load time because
@@ -1846,9 +1987,126 @@ def _service_zone(row: dict) -> typing.Optional[models.ServiceZone]:
     """
     return _zone_from_row(row)
 
+def _safe_float(value: typing.Any) -> typing.Optional[float]:
+    """Best-effort float parser for CSV metadata values."""
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value).strip()
+
+    if text == "":
+        return None
+
+    text = (
+        text.replace("£", "")
+        .replace("GBP", "")
+        .replace(",", "")
+        .strip()
+    )
+
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_country_amount_map(value: typing.Any) -> typing.Dict[str, float]:
+    """
+    Normalize country-specific surcharge metadata into a dict.
+
+    This protects load_services_from_csv() from failing when CSV or generated
+    metadata contains a string instead of an actual mapping.
+
+    Supported examples:
+
+        {"US": 4.2, "CA": 5.1}
+
+        '{"US": 4.2, "CA": 5.1}'
+
+        "{'US': 4.2, 'CA': 5.1}"
+
+        "US:4.2,CA:5.1"
+
+        "US=4.2;CA=5.1"
+    """
+    if value is None:
+        return {}
+
+    if isinstance(value, collections.abc.Mapping):
+        result: typing.Dict[str, float] = {}
+
+        for country_code, amount in value.items():
+            if country_code is None:
+                continue
+
+            country_code_text = str(country_code).strip().upper()
+
+            if country_code_text == "":
+                continue
+
+            amount_float = _safe_float(amount)
+
+            if amount_float is None:
+                continue
+
+            result[country_code_text] = amount_float
+
+        return result
+
+    if isinstance(value, str):
+        raw = value.strip()
+
+        if raw == "":
+            return {}
+
+        if raw.startswith("{") and raw.endswith("}"):
+            for parser in [json.loads, ast.literal_eval]:
+                try:
+                    parsed = parser(raw)
+                except Exception:
+                    continue
+
+                if isinstance(parsed, collections.abc.Mapping):
+                    return _coerce_country_amount_map(parsed)
+
+        result: typing.Dict[str, float] = {}
+
+        for token in re.split(r"[,;|\n]+", raw):
+            token = token.strip()
+
+            if token == "":
+                continue
+
+            if ":" in token:
+                country_code, amount = token.split(":", 1)
+            elif "=" in token:
+                country_code, amount = token.split("=", 1)
+            else:
+                continue
+
+            country_code = country_code.strip().upper()
+
+            if country_code == "":
+                continue
+
+            amount_float = _safe_float(amount)
+
+            if amount_float is None:
+                continue
+
+            result[country_code] = amount_float
+
+        return result
+
+    return {}
 
 def load_services_from_csv(
     csv_path: pathlib.Path = SERVICES_CSV,
+    parcelforce_csv_path: typing.Optional[pathlib.Path] = None,
+    royalmail_international_csv_path: typing.Optional[pathlib.Path] = None,
 ) -> typing.List[models.ServiceLevel]:
     """
     Load Royal Mail Click & Drop service definitions from services.csv.
@@ -1861,12 +2119,12 @@ def load_services_from_csv(
 
     Raw carrier units and limits are preserved in ServiceLevel.metadata.
 
-    Royal Mail grouped international zone ids are expanded into Karrio
-    ServiceZone objects:
-
-    - intl_generic -> Europe Zones 1/2/3 + World Zones 1/2/3
-    - intl_europe  -> Europe Zones 1/2/3
-    - intl_row     -> World Zones 1/2/3
+    Parcelforce international pricing:
+    - services.csv contains the service catalogue/placeholders.
+    - parcelforce-international-services.csv contains country-specific 0-30kg
+      rate bands and country-specific additional-kg surcharges after 30kg.
+    - The sidecar rows are converted to ServiceZone rows and merged into the
+      same ServiceLevel definitions.
 
     Important for Karrio 2026.1.31+:
     - Every ServiceLevel gets a stable id equal to service_code.
@@ -1874,20 +2132,58 @@ def load_services_from_csv(
     - Multiple CSV rows with the same service_code are merged into one
       ServiceLevel with multiple zone/rate bands.
     """
+    csv_path = pathlib.Path(csv_path)
+
     if not csv_path.exists():
         return []
 
+    parcelforce_csv_path = (
+        pathlib.Path(parcelforce_csv_path)
+        if parcelforce_csv_path is not None
+        else csv_path.with_name("parcelforce-international-services.csv")
+    )
+
+    royalmail_international_csv_path = (
+        pathlib.Path(royalmail_international_csv_path)
+        if royalmail_international_csv_path is not None
+        else csv_path.with_name("royalmail-international-services.csv")
+    )
+
     services_by_code: typing.Dict[str, dict] = {}
 
+    identity_cache: typing.Dict[
+        typing.Tuple[str, str],
+        typing.Set[typing.Tuple],
+    ] = {}
+
     def _append_unique(
+        service_code: str,
+        collection_name: str,
         target: typing.List[typing.Any],
         values: typing.Iterable[typing.Any],
         identity_fn: typing.Callable[[typing.Any], typing.Tuple],
     ) -> None:
-        existing_identities = {
-            identity_fn(existing)
-            for existing in target
-        }
+        """
+        Append unique values without rebuilding the identity set on every CSV row.
+
+        The previous implementation rebuilt:
+
+            {identity_fn(existing) for existing in target}
+
+        for every merged row. With Parcelforce international rows this becomes
+        very expensive because one service can have thousands of generated
+        country/weight-band zones.
+        """
+        cache_key = (service_code, collection_name)
+
+        existing_identities = identity_cache.get(cache_key)
+
+        if existing_identities is None:
+            existing_identities = {
+                identity_fn(existing)
+                for existing in target
+            }
+            identity_cache[cache_key] = existing_identities
 
         for value in values:
             identity = identity_fn(value)
@@ -1898,131 +2194,265 @@ def load_services_from_csv(
             target.append(value)
             existing_identities.add(identity)
 
-    with open(csv_path, newline="", encoding="utf-8-sig") as csvfile:
-        reader = csv.DictReader(csvfile)
+    def _read_base_rows() -> typing.List[dict]:
+        with open(csv_path, newline="", encoding="utf-8-sig") as csvfile:
+            return list(csv.DictReader(csvfile))
 
-        for row in reader:
-            service_code = _row_value(row, "service_code")
+    def _row_has_explicit_rate_band(row: dict) -> bool:
+        return any(
+            _row_value(row, column) is not None
+            for column in [
+                "rate",
+                "cost",
+                "zone_min_weight",
+                "zone_max_weight",
+                "zoneMinWeight",
+                "zoneMaxWeight",
+            ]
+        )
 
-            if service_code is None:
+    def _remove_base_rows_replaced_by_sidecars(
+        rows: typing.List[dict],
+        sidecar_rows: typing.List[dict],
+    ) -> typing.List[dict]:
+        """
+        Remove services.csv rows for services that are priced by sidecar tables.
+
+        services.csv remains the compact catalogue/template source.
+
+        Sidecar files are the rate-table source of truth for high-volume,
+        zone-heavy products such as:
+
+        - Parcelforce international
+        - Royal Mail international
+
+        Once sidecar rows have been generated for a service_code, all original
+        services.csv rows for that service_code must be removed before appending
+        the generated rows.
+
+        This prevents duplicated zones when services.csv already contains stale
+        generated/priced rows.
+        """
+        sidecar_service_codes = {
+            _row_value(row, "service_code")
+            for row in sidecar_rows
+            if _row_value(row, "service_code") is not None
+        }
+
+        if not sidecar_service_codes:
+            return rows
+
+        return [
+            row
+            for row in rows
+            if _row_value(row, "service_code") not in sidecar_service_codes
+        ]
+
+    base_rows = _read_base_rows()
+
+    parcelforce_rows, parcelforce_metadata_by_service = (
+        parcelforce_international.expand_parcelforce_international_rows(
+            base_rows,
+            parcelforce_csv_path,
+        )
+    )
+
+    royalmail_international_rows = (
+        royalmail_international.expand_royalmail_international_rows(
+            base_rows,
+            royalmail_international_csv_path,
+        )
+    )
+
+    sidecar_rows = [
+        *parcelforce_rows,
+        *royalmail_international_rows,
+    ]
+
+    rows = [
+        *_remove_base_rows_replaced_by_sidecars(
+            base_rows,
+            sidecar_rows,
+        ),
+        *parcelforce_rows,
+        *royalmail_international_rows,
+    ]
+
+    for row in rows:
+        service_code = _row_value(row, "service_code")
+
+        if service_code is None:
+            continue
+
+        _validate_service_code(service_code)
+
+        row_active = is_active_flag(
+            _row_value(row, "active", "enabled"),
+            default=True,
+        )
+
+        service_name = (
+            _row_value(row, "service_name", "name")
+            or service_code.replace("_", " ").title()
+        )
+
+        carrier_service_code = (
+            _row_value(
+                row,
+                "carrier_service_code",
+                "royalmail_service_code",
+                "serviceCode",
+            )
+            or service_code
+        )
+
+        raw_weight_unit = _row_value(row, "weight_unit") or "KG"
+        raw_dimension_unit = _row_value(row, "dimension_unit") or "CM"
+
+        weight_unit = _normalize_weight_unit(raw_weight_unit)
+        dimension_unit = _normalize_dimension_unit(raw_dimension_unit)
+
+        row_zones = _service_zones(row)
+        row_surcharges = _service_surcharges(row)
+
+        normalized_dimensions = _normalize_dimension_limits(
+            _convert_dimension_value(
+                _row_value(row, "max_length"),
+                raw_dimension_unit,
+                dimension_unit,
+            ),
+            _convert_dimension_value(
+                _row_value(row, "max_width"),
+                raw_dimension_unit,
+                dimension_unit,
+            ),
+            _convert_dimension_value(
+                _row_value(row, "max_height"),
+                raw_dimension_unit,
+                dimension_unit,
+            ),
+        )
+
+        if service_code not in services_by_code:
+            services_by_code[service_code] = {
+                # Critical for Karrio 2026.1.31+ rate-sheet references.
+                # Without this, transform_to_shared_zones_format() uses
+                # positional service IDs such as "0", "1", "2".
+                "id": service_code,
+
+                "service_name": service_name,
+                "service_code": service_code,
+                "carrier_service_code": carrier_service_code,
+                "description": _row_value(row, "description", "notes") or "",
+                "active": row_active,
+                "currency": _row_value(row, "currency") or "GBP",
+
+                # Normalized Karrio rating units.
+                "weight_unit": weight_unit,
+                "dimension_unit": dimension_unit,
+
+                # Normalized Karrio rating limits.
+                "min_weight": _convert_weight_value(
+                    _row_value(row, "min_weight"),
+                    raw_weight_unit,
+                    weight_unit,
+                ),
+                "max_weight": _convert_weight_value(
+                    _row_value(row, "max_weight"),
+                    raw_weight_unit,
+                    weight_unit,
+                ),
+                "max_length": normalized_dimensions[0],
+                "max_width": normalized_dimensions[1],
+                "max_height": normalized_dimensions[2],
+
+                "cost": _to_float(_row_value(row, "cost")),
+                "transit_days": _to_int(_row_value(row, "transit_days")),
+                "domicile": _to_bool(_row_value(row, "domicile")),
+                "international": _to_bool(_row_value(row, "international")),
+                "features": _service_features(row),
+                "metadata": _service_metadata(row),
+
+                # Attach first-row zones and surcharges immediately.
+                "zones": list(row_zones),
+                "surcharges": list(row_surcharges),
+            }
+
+            continue
+
+        service_data = services_by_code[service_code]
+
+        # Keep the merged service inactive if any explicit row is inactive.
+        #
+        # Parcelforce sidecar placeholder rows were removed before this point,
+        # so inactive no-rate placeholders no longer suppress real sidecar
+        # prices.
+        service_data["active"] = (
+            is_active_flag(service_data.get("active"), default=True)
+            and row_active
+        )
+
+        _append_unique(
+            service_code,
+            "zones",
+            service_data.setdefault("zones", []),
+            row_zones,
+            _zone_identity,
+        )
+
+        _append_unique(
+            service_code,
+            "surcharges",
+            service_data.setdefault("surcharges", []),
+            row_surcharges,
+            _surcharge_identity,
+        )
+
+    for service_code, sidecar_metadata in parcelforce_metadata_by_service.items():
+        service_data = services_by_code.get(service_code)
+
+        if service_data is None:
+            continue
+
+        if not isinstance(sidecar_metadata, collections.abc.Mapping):
+            continue
+
+        metadata = service_data.get("metadata")
+
+        if not isinstance(metadata, dict):
+            metadata = {}
+            service_data["metadata"] = metadata
+
+        by_country = _coerce_country_amount_map(
+            sidecar_metadata.get(
+                "oversized_surcharge_amount_per_kg_by_country"
+            )
+        )
+
+        existing_by_country = _coerce_country_amount_map(
+            metadata.get(
+                "oversized_surcharge_amount_per_kg_by_country"
+            )
+        )
+
+        if existing_by_country or by_country:
+            metadata["oversized_surcharge_amount_per_kg_by_country"] = {
+                **existing_by_country,
+                **by_country,
+            }
+
+        for key in [
+            "oversized_surcharge_threshold_kg",
+            "oversized_surcharge_max_weight_kg",
+            "oversized_surcharge_rounding",
+        ]:
+            value = sidecar_metadata.get(key)
+
+            if value in [None, ""]:
                 continue
 
-            _validate_service_code(service_code)
-
-            row_active = is_active_flag(
-                _row_value(row, "active", "enabled"),
-                default=True,
-            )
-
-            service_name = (
-                _row_value(row, "service_name", "name")
-                or service_code.replace("_", " ").title()
-            )
-
-            carrier_service_code = (
-                _row_value(
-                    row,
-                    "carrier_service_code",
-                    "royalmail_service_code",
-                    "serviceCode",
-                )
-                or service_code
-            )
-
-            raw_weight_unit = _row_value(row, "weight_unit") or "KG"
-            raw_dimension_unit = _row_value(row, "dimension_unit") or "CM"
-
-            weight_unit = _normalize_weight_unit(raw_weight_unit)
-            dimension_unit = _normalize_dimension_unit(raw_dimension_unit)
-
-            row_zones = _service_zones(row)
-            row_surcharges = _service_surcharges(row)
-
-            normalized_dimensions = _normalize_dimension_limits(
-                _convert_dimension_value(
-                    _row_value(row, "max_length"),
-                    raw_dimension_unit,
-                    dimension_unit,
-                ),
-                _convert_dimension_value(
-                    _row_value(row, "max_width"),
-                    raw_dimension_unit,
-                    dimension_unit,
-                ),
-                _convert_dimension_value(
-                    _row_value(row, "max_height"),
-                    raw_dimension_unit,
-                    dimension_unit,
-                ),
-            )
-
-            if service_code not in services_by_code:
-                services_by_code[service_code] = {
-                    # Critical for Karrio 2026.1.31+ rate-sheet references.
-                    # Without this, transform_to_shared_zones_format() uses
-                    # positional service IDs such as "0", "1", "2".
-                    "id": service_code,
-
-                    "service_name": service_name,
-                    "service_code": service_code,
-                    "carrier_service_code": carrier_service_code,
-                    "description": _row_value(row, "description", "notes") or "",
-                    "active": row_active,
-                    "currency": _row_value(row, "currency") or "GBP",
-
-                    # Normalized Karrio rating units.
-                    "weight_unit": weight_unit,
-                    "dimension_unit": dimension_unit,
-
-                    # Normalized Karrio rating limits.
-                    "min_weight": _convert_weight_value(
-                        _row_value(row, "min_weight"),
-                        raw_weight_unit,
-                        weight_unit,
-                    ),
-                    "max_weight": _convert_weight_value(
-                        _row_value(row, "max_weight"),
-                        raw_weight_unit,
-                        weight_unit,
-                    ),
-                    "max_length": normalized_dimensions[0],
-                    "max_width": normalized_dimensions[1],
-                    "max_height": normalized_dimensions[2],
-
-                    "cost": _to_float(_row_value(row, "cost")),
-                    "transit_days": _to_int(_row_value(row, "transit_days")),
-                    "domicile": _to_bool(_row_value(row, "domicile")),
-                    "international": _to_bool(_row_value(row, "international")),
-                    "features": _service_features(row),
-                    "metadata": _service_metadata(row),
-
-                    # Attach first-row zones and surcharges immediately.
-                    "zones": list(row_zones),
-                    "surcharges": list(row_surcharges),
-                }
-
-                continue
-
-            service_data = services_by_code[service_code]
-
-            # If multiple CSV rows share the same service_code, keep the merged
-            # service inactive if any row is inactive.
-            service_data["active"] = (
-                is_active_flag(service_data.get("active"), default=True)
-                and row_active
-            )
-
-            _append_unique(
-                service_data.setdefault("zones", []),
-                row_zones,
-                _zone_identity,
-            )
-
-            _append_unique(
-                service_data.setdefault("surcharges", []),
-                row_surcharges,
-                _surcharge_identity,
-            )
+            if metadata.get(key) in [None, ""]:
+                metadata[key] = value
 
     for service_data in services_by_code.values():
         service_data["zones"] = _normalize_service_zone_bands(
@@ -2034,8 +2464,68 @@ def load_services_from_csv(
         for service_data in services_by_code.values()
     ]
 
+
+def _csv_rows_by_service_code(
+    csv_path: pathlib.Path = SERVICES_CSV,
+) -> typing.Dict[str, dict]:
+    """
+    Return the first raw services.csv row for each service_code.
+
+    This intentionally mirrors the service test helper:
+
+        rows_by_code.setdefault(row["service_code"], row)
+
+    Plugin metadata should expose services that are active in the raw CSV
+    catalogue, not services that became runtime-active because the Parcelforce
+    international sidecar generated rate bands for them.
+    """
+    csv_path = pathlib.Path(csv_path)
+
+    if not csv_path.exists():
+        return {}
+
+    rows_by_code: typing.Dict[str, dict] = {}
+
+    with open(csv_path, newline="", encoding="utf-8-sig") as csvfile:
+        for row in csv.DictReader(csvfile):
+            service_code = _row_value(row, "service_code")
+
+            if service_code is None:
+                continue
+
+            row["service_code"] = service_code
+            rows_by_code.setdefault(service_code, row)
+
+    return rows_by_code
+
+
+def _active_csv_service_codes(
+    csv_path: pathlib.Path = SERVICES_CSV,
+) -> typing.Set[str]:
+    """
+    Return service codes that are active in the raw services.csv catalogue.
+
+    Do not use ACTIVE_DEFAULT_SERVICES here. ACTIVE_DEFAULT_SERVICES includes
+    services activated by generated Parcelforce sidecar rows, which is correct
+    for runtime rating but incorrect for plugin.METADATA.service_levels.
+    """
+    return {
+        service_code
+        for service_code, row in _csv_rows_by_service_code(csv_path).items()
+        if service_is_active(row)
+    }
+
 DEFAULT_SERVICES = load_services_from_csv()
 ACTIVE_DEFAULT_SERVICES = active_service_levels(DEFAULT_SERVICES)
+
+ACTIVE_CSV_SERVICE_CODES = _active_csv_service_codes()
+
+CSV_ACTIVE_DEFAULT_SERVICES = [
+    service
+    for service in DEFAULT_SERVICES
+    if service.service_code in ACTIVE_CSV_SERVICE_CODES
+    and service_is_active(service)
+]
 
 ALL_SERVICE_LEVEL_BY_CODE: typing.Dict[str, models.ServiceLevel] = {
     service.service_code: service
@@ -2063,6 +2553,7 @@ for service in ACTIVE_DEFAULT_SERVICES:
             service.carrier_service_code,
             service.service_code,
         )
+
 
 
 def _create_shipping_service_enum(
@@ -2591,13 +3082,7 @@ REFERENCE_SERVICE_LEVELS = ReferenceRecord.wrap(
     )
 )
 
-ACTIVE_REFERENCE_SERVICE_LEVELS = ReferenceRecord.wrap(
-    _reference_service_level_dicts(
-        ACTIVE_DEFAULT_SERVICES,
-        include_inactive=False,
-        require_rate_data=True,
-    )
-)
+ACTIVE_REFERENCE_SERVICE_LEVELS = REFERENCE_SERVICE_LEVELS
 
 
 def _service_selector_key(value: typing.Any) -> typing.Optional[str]:
@@ -4066,6 +4551,9 @@ def resolve_rate_service_codes(
     ]
 
     if not any(carrier_matches):
+        if raw_carrier_code in ALL_CARRIER_SERVICE_CODES:
+            return []
+
         return [raw_text]
 
     formats = [
@@ -4294,7 +4782,7 @@ class ConnectionConfig(lib.Enum):
     carrier_name = lib.OptionEnum(
         "carrier_name",
         str,
-        default="Royal Mail",
+        default="Royal Mail OBA",
     )
     include_label_in_response = lib.OptionEnum(
         "include_label_in_response",

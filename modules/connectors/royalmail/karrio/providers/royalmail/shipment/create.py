@@ -1468,6 +1468,44 @@ def _contents_weight_in_grams(
 
     return total if has_weight else None
 
+def _validate_multi_package_customs_item_assignment(
+    packages,
+    raw_parcels,
+    customs,
+):
+    """
+    Prevent silent loss of customs content on multi-package international orders.
+
+    Click & Drop stores product contents under each package. When a shipment has
+    multiple packages, shipment-level customs.commodities cannot be safely mapped
+    to a specific parcel unless the caller provided parcel-level `items`.
+    """
+    package_count = len(packages or [])
+
+    if package_count <= 1 or customs is None:
+        return
+
+    customs_items = list(getattr(customs, "commodities", None) or [])
+
+    if not any(customs_items):
+        return
+
+    parcels_missing_items = []
+
+    for index, package in enumerate(packages or []):
+        raw_package = raw_parcels[index] if index < len(raw_parcels or []) else None
+
+        if not any(_explicit_package_items(package, raw_package)):
+            parcels_missing_items.append(index)
+
+    if any(parcels_missing_items):
+        raise ValueError(
+            "Royal Mail Click & Drop multi-package customs shipments require "
+            "parcel-level `items` on every parcel. Shipment-level "
+            "`customs.commodities` cannot be safely assigned to individual "
+            f"packages. Missing parcel item declarations at indexes: "
+            f"{', '.join(str(index) for index in parcels_missing_items)}."
+        )
 
 def _validate_package_weight_not_less_than_contents(
     packages,
