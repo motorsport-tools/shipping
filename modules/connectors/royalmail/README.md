@@ -127,7 +127,7 @@ settings = Settings(
 | `click_and_drop_api_key` |      yes | Royal Mail Click & Drop bearer token              |
 | `tracking_client_id`     |       no | Royal Mail Tracking API client id                 |
 | `tracking_client_secret` |       no | Royal Mail Tracking API client secret             |
-| `test_mode`              |       no | Standard Karrio flag                              |
+| `test_mode`              |       no | Standard Karrio flag royalmail dont have test urls|
 | `account_country_code`   |       no | Used for currency/default account context         |
 | `services`               |       no | Optional configured service list for rating mixin |
 | `metadata`               |       no | Standard Karrio metadata                          |
@@ -141,18 +141,19 @@ Carrier-specific connection behavior can be configured through `settings.config`
 
 ### Supported connection config keys
 
-| Key                                | Type   | Default                                   | Description                                                                          |
-| ---------------------------------- | ------ | ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| `click_and_drop_api_base_url`      | `str`  | `https://api.parcel.royalmail.com/api/v1` | Click & Drop API base URL                                                            |
-| `tracking_api_base_url`            | `str`  | `https://api.royalmail.net`               | Tracking API base URL                                                                |
-| `carrier_name`                     | `str`  | `None`                                    | Default carrier name sent in shipment/manifest requests                              |
-| `label_type`                       | `str`  | `PDF`                                     | Default label document type                                                          |
-| `include_label_in_response`        | `bool` | `True`                                    | Request label data during shipment creation                                          |
-| `include_return_label_in_response` | `bool` | `False`                                   | Request return label data by default                                                 |
-| `shipping_options`                 | `list` | `[]`                                      | Optional configured defaults                                                         |
-| `shipping_services`                | `list` | built-in catalog                          | Optional configured services                                                         |
-| `apply_uk_vat_to_rates`            | `bool` | `False`                                   | Force UK VAT gross-up on locally rated services unless service metadata disables VAT |
-| `uk_vat_rate_percentage`           | `float`| `20.0`                                    | VAT rate used when VAT is applied and no service-specific VAT rate is configured     |
+| Key                                    | Type   | Default                                   | Description                                                                          |
+| -------------------------------------- | ------ | ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| `click_and_drop_api_base_url`          | `str`  | `https://api.parcel.royalmail.com/api/v1` | Click & Drop API base URL                                                            |
+| `tracking_api_base_url`                | `str`  | `https://api.royalmail.net`               | Tracking API base URL                                                                |
+| `carrier_name`                         | `str`  | `Royal Mail OBA`                          | Default carrier name sent in shipment/manifest requests                              |
+| `label_type`                           | `str`  | `PDF`                                     | Default label document type                                                          |
+| `include_label_in_response`            | `bool` | `True`                                    | Request label data during shipment creation                                          |
+| `include_return_label_in_response`     | `bool` | `False`                                   | Request return label data by default                                                 |
+| `shipping_options`                     | `list` | `[]`                                      | Optional configured defaults                                                         |
+| `shipping_services`                    | `list` | built-in catalog                          | Optional configured services                                                         |
+| `apply_uk_vat_to_rates`                | `bool` | `False`                                   | Force UK VAT gross-up on locally rated services unless service metadata disables VAT |
+| `uk_vat_rate_percentage`               | `float`| `20.0`                                    | VAT rate used when VAT is applied and no service-specific VAT rate is configured     |
+| `apply_large_packaging_charge_to_rates`| `bool` | `False`                                   | Enables Royal Mail large-packaging charge calculation during local/static rating.    |
 
 Example:
 
@@ -474,7 +475,7 @@ payload, messages = gateway.mapper.parse_get_return_services_response(
 
 ```python
 request = gateway.mapper.create_get_manifest_request({
-    "manifest_identifier": "MANIFEST-123",
+    "manifest_identifier": 12345
 })
 
 payload, messages = gateway.mapper.parse_get_manifest_response(
@@ -486,7 +487,7 @@ payload, messages = gateway.mapper.parse_get_manifest_response(
 
 ```python
 request = gateway.mapper.create_retry_manifest_request({
-    "manifest_identifier": "MANIFEST-123",
+    "manifest_identifier": 12345
 })
 
 payload, messages = gateway.mapper.parse_retry_manifest_response(
@@ -590,6 +591,51 @@ A LOT OF THESE STILL NEED TO BE MERGED INTO KARRIO SWITCHES AND FIELDS IN THE UI
 
 ---
 
+## Required service catalogue files
+
+This connector uses packaged CSV service catalogues for service resolution and
+local/static rating.
+
+The following files must be included in the installed Python package:
+
+```text
+karrio/providers/royalmail/services.csv
+karrio/providers/royalmail/royalmail-international-services.csv
+karrio/providers/royalmail/parcelforce-international-services.csv
+```
+
+If these files are missing, the connector may still import, but rating and
+service resolution can return no services.
+
+Verify package data with:
+
+```bash
+python - <<'PY'
+from karrio.providers.royalmail import units
+
+print("DEFAULT_SERVICES:", len(units.DEFAULT_SERVICES))
+print("ACTIVE_DEFAULT_SERVICES:", len(units.ACTIVE_DEFAULT_SERVICES))
+print("REFERENCE_SERVICE_LEVELS:", len(units.REFERENCE_SERVICE_LEVELS))
+print("ShippingService members:", len(units.ShippingService.__members__))
+PY
+```
+
+The service catalogue is also used to resolve Royal Mail and Parcelforce service
+metadata such as:
+
+- Karrio service code
+- Royal Mail carrier service code
+- Royal Mail service register code
+- package format support
+- domestic/international zones
+- active/inactive status
+- compensation limits
+- VAT behavior
+- surcharge rules
+- feature flags such as tracked, signed, age verification, Saturday delivery,
+  dangerous goods, DDP/DTP, and returns support
+
+
 ### Service-code and package-format behaviour
 
 Royal Mail carrier service codes are not always unique Karrio service selectors.
@@ -643,6 +689,16 @@ Examples of packaging types include:
 - `large_parcel`
 - `documents`
 
+the connector accepts Karrio-style aliases and maps them to Click & Drop values
+
+Karrio value	Click & Drop value
+large_letter ->	largeLetter
+small_parcel ->	smallParcel
+medium_parcel ->	mediumParcel
+large_parcel ->	largeParcel
+documents ->	documents
+your_packaging ->	resolved by connector
+
 For the authoritative enums, see:
 
 - `karrio.providers.royalmail.units.ShippingService`
@@ -667,8 +723,93 @@ TSS
 
 For example, `CRL24` is ambiguous as a Karrio service selector but valid as a Click & Drop raw `serviceCode`. The raw carrier codes may pass through for shipment creation, while rating expands them into active canonical Karrio services where possible.
 
+## Dangerous goods options
 
----
+The connector exposes Royal Mail dangerous goods options where supported by the
+selected service.
+
+Common options:
+
+| Option | Description |
+|---|---|
+| `contains_dangerous_goods` / `containsDangerousGoods` | Indicates that the shipment contains dangerous goods |
+| `dangerous_goods_un_code` / `dangerousGoodsUnCode` | UN code |
+| `dangerous_goods_description` / `dangerousGoodsDescription` | Dangerous goods description |
+| `dangerous_goods_quantity` / `dangerousGoodsQuantity` | Dangerous goods quantity |
+
+Example:
+
+```python
+shipment_request = models.ShipmentRequest(
+    service="royalmail_tracked_24",
+    shipper=shipper,
+    recipient=recipient,
+    parcels=[
+        models.Parcel(
+            weight=0.5,
+            weight_unit="KG",
+            packaging_type="small_parcel",
+        )
+    ],
+    options={
+        "contains_dangerous_goods": True,
+        "dangerous_goods_un_code": "UN3481",
+        "dangerous_goods_description": "Lithium ion batteries contained in equipment",
+        "dangerous_goods_quantity": 1,
+    },
+)
+```
+
+Not every Royal Mail service supports dangerous goods. The connector may filter
+services during local/static rating based on the service catalogue, and Click &
+Drop may reject unsupported combinations during order creation.
+
+## Multi-package behavior
+
+Royal Mail Click & Drop service support for multi-package shipments depends on
+the selected service and package format.
+
+The connector validates package data and uses the service catalogue to determine
+whether a service/package combination is supported.
+
+Guidance:
+
+- provide one `models.Parcel` for each package;
+- set `weight`, `weight_unit`, and package dimensions where available;
+- use `packaging_type` or `options.package_format_identifier` to select the
+  Royal Mail package format;
+- ensure the selected service supports the requested package format;
+- for international shipments, provide customs commodities at shipment level
+  through `models.Customs`;
+- avoid mixing incompatible package formats for a single Click & Drop service.
+
+Example:
+
+```python
+shipment_request = models.ShipmentRequest(
+    service="royalmail_tracked_24",
+    shipper=shipper,
+    recipient=recipient,
+    parcels=[
+        models.Parcel(
+            weight=0.5,
+            weight_unit="KG",
+            packaging_type="small_parcel",
+        ),
+        models.Parcel(
+            weight=0.7,
+            weight_unit="KG",
+            packaging_type="small_parcel",
+        ),
+    ],
+    options={
+        "package_format_identifier": "small_parcel",
+    },
+)
+```
+
+If Royal Mail rejects a multi-package shipment, first verify that the selected
+service supports the requested number of parcels and package format.
 
 ## Important Royal Mail behavior
 
@@ -938,5 +1079,86 @@ Current plugin metadata status: `development`
 
 ## Future changes Needed
 
-- I think I'm using too many custom helpers as I dont know all the libs that karrio provided some of the opperations are probably built in to karrio
+- The code is using too many custom helpers as I dont know all the libs that karrio provided some of the opperations and function the code performs are probably built in to karrio
 - create.py needs simplifying the \_build helpers need writing into one and again more of the handling of values are probably available in the libs enum
+- There seems to be some confusion around custom packages and the API
+
+        Royal Mail Click & Drop defines:
+
+        ShipmentPackageRequest:
+        required:
+            - weightInGrams
+            - packageFormatIdentifier
+        properties:
+            weightInGrams:
+            type: integer
+            packageFormatIdentifier:
+            type: string
+            customPackageFormatIdentifier:
+            type: string
+
+    Currently customPackageFormatIdentifier is supported, but is planned to be deprecated by Royal Mail
+    The updated Click & Drop schema says:
+
+    customPackageFormatIdentifier:
+    description: This field will be deprecated in the future. Please use 'packageFormatIdentifier'
+    for custom package formats from ChannelShipper.
+    the code implementation supports both:
+
+    packageFormatIdentifier
+    customPackageFormatIdentifier
+
+    But for future-proofing, users should generally put custom ChannelShipper format names into:
+
+    package_format_identifier
+
+    the code implementation already passes through when the format is unknown. but as we dont have a channel shipper account its hard to understand what the requirements are.
+
+    Recommendation:
+    Keep custom_package_format_identifier for backward compatibility. But when we know more of the templates they use Prefer package_format_identifier in docs/examples for new custom package formats.
+
+- For Royal Mail return shipment creation, provide the parcel sender/customer
+    as `shipper`, and provide the merchant/warehouse return destination as
+    `recipient` or `return_address`.
+
+    This differs from a normal outbound shipment where `shipper` is usually the
+    merchant and `recipient` is the customer.
+
+    still need to implement return shipper address fully
+
+## Service catalogue maintenance
+
+When Royal Mail rates, service names, package support, compensation levels, or
+surcharges change, update the packaged CSV catalogues.
+
+Recommended update process:
+
+1. update `karrio/providers/royalmail/services.csv`;
+2. update `karrio/providers/royalmail/royalmail-international-services.csv`
+   if Royal Mail international services changed;
+3. update `karrio/providers/royalmail/parcelforce-international-services.csv`
+   if Parcelforce international services changed;
+4. verify required columns are still present;
+5. run service catalogue loading checks;
+6. run rating tests;
+7. run shipment creation tests;
+8. build the package and confirm the CSV files are included as package data.
+
+Suggested validation command:
+
+```bash
+python - <<'PY'
+from karrio.providers.royalmail import units
+
+print("default:", len(units.DEFAULT_SERVICES))
+print("active:", len(units.ACTIVE_DEFAULT_SERVICES))
+print("reference levels:", len(units.REFERENCE_SERVICE_LEVELS))
+
+for service in units.ACTIVE_DEFAULT_SERVICES[:10]:
+    print(service.service_code, service.service_name)
+PY
+```
+
+Because rating is local/static, stale CSV data can produce stale or incorrect
+rates. Keep these files aligned with the Royal Mail account products and pricing
+you intend to support.
