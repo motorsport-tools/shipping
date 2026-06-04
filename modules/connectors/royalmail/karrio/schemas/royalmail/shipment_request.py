@@ -80,6 +80,7 @@ class DimensionsType:
 class PackageType:
     weightInGrams: typing.Optional[int] = None
     packageFormatIdentifier: typing.Optional[str] = None
+    customPackageFormatIdentifier: typing.Optional[str] = None
     dimensions: typing.Optional[DimensionsType] = jstruct.JStruct[DimensionsType]
     contents: typing.Optional[typing.List[ContentType]] = jstruct.JList[ContentType]
 
@@ -93,6 +94,7 @@ class PostageDetailsType:
     consequentialLoss: typing.Optional[int] = None
     receiveEmailNotification: typing.Optional[bool] = None
     receiveSmsNotification: typing.Optional[bool] = None
+    guaranteedSaturdayDelivery: typing.Optional[bool] = None
     requestSignatureUponDelivery: typing.Optional[bool] = None
     isLocalCollect: typing.Optional[bool] = None
     safePlace: typing.Optional[str] = None

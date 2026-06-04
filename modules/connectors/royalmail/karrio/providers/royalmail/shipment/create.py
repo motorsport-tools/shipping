@@ -228,6 +228,21 @@ def _resolve_package_explicit_format(
         shipment_explicit_package_format,
     )
 
+def _resolve_package_custom_format(
+    raw_package,
+    shipment_custom_package_format: typing.Optional[str] = None,
+) -> typing.Optional[str]:
+    """
+    Resolve Royal Mail Click & Drop customPackageFormatIdentifier.
+
+    Parcel-level customPackageFormatIdentifier overrides shipment-level default.
+    """
+    package_options = _package_shipping_options(raw_package)
+
+    return _first_present(
+        package_options.custom_package_format_identifier.state,
+        shipment_custom_package_format,
+    )
 
 def _validate_package_level_options(raw_parcels):
     """
@@ -301,6 +316,57 @@ def _package_format_kind(package_format: typing.Optional[str]) -> typing.Optiona
     # Preserve unknown/custom package format identifiers.
     return value or None
 
+def _resolve_shipment_service_register_code(
+    selected_service: typing.Optional[str],
+    package_formats: typing.Iterable[typing.Optional[str]],
+) -> typing.Optional[str]:
+    """
+    Resolve Royal Mail Click & Drop serviceRegisterCode for a shipment.
+
+    Use the actual resolved packageFormatIdentifier values first, then their
+    collapsed register-code package kinds.
+
+    This avoids losing the distinction between:
+
+        largeLetter -> serviceRegisterCode 01
+        smallParcel / parcel -> serviceRegisterCode 02
+
+    for product-family serviceCode values such as TPN24.
+    """
+    if selected_service in [None, ""]:
+        return None
+
+    candidates: typing.List[str] = []
+
+    def append_candidate(value: typing.Any) -> None:
+        if value in [None, ""]:
+            return
+
+        candidate = str(value).strip()
+
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    for package_format in package_formats or []:
+        append_candidate(package_format)
+        append_candidate(_package_format_kind(package_format))
+
+    for package_format in candidates:
+        service_register_code = provider_units.resolve_service_register_code(
+            selected_service,
+            package_format=package_format,
+        )
+
+        if service_register_code not in [None, ""]:
+            return service_register_code
+
+    # Only fall back to service-only resolution when there was no useful package
+    # format. Do not use this fallback for flexible services with an unresolved
+    # package format because that can incorrectly reuse the first merged CSV row.
+    if not candidates:
+        return provider_units.resolve_service_register_code(selected_service)
+
+    return None
 
 def _resolve_package_formats(
     packages,
@@ -463,29 +529,101 @@ def _resolve_selected_service(payload, options):
 
     return provider_units.resolve_service_code(selector) or selector
 
-def _is_northern_ireland(address) -> bool:
-    """Return whether an address is in Northern Ireland."""
-    postcode = (
-        (
+def _country_code(address) -> str:
+    """Normalize an address country code for Royal Mail Click & Drop checks."""
+    value = (
+        provider_utils.get_value(address, "country_code")
+        or provider_utils.get_value(address, "countryCode")
+        or ""
+    )
+
+    code = str(value).strip().upper()
+
+    # Karrio and client payloads should use ISO-3166 alpha-2 "GB", but this
+    # makes the lane check tolerant of common user input.
+    if code == "UK":
+        return "GB"
+
+    return code
+
+
+def _postcode(address) -> str:
+    """Normalize an address postcode for Royal Mail Click & Drop lane checks."""
+    return (
+        str(
             provider_utils.get_value(address, "postal_code")
             or provider_utils.get_value(address, "postcode")
+            or provider_utils.get_value(address, "postalCode")
             or ""
         )
         .replace(" ", "")
         .upper()
     )
-    return postcode.startswith("BT")
+
+
+def _is_northern_ireland(address) -> bool:
+    """Return whether an address is in Northern Ireland."""
+    return _postcode(address).startswith("BT")
 
 
 def _is_gb_to_northern_ireland(shipper, recipient) -> bool:
-    """Return whether the shipment is a GB-to-Northern-Ireland movement."""
+    """Return whether the shipment is from Great Britain to Northern Ireland."""
     return (
-        (provider_utils.get_value(shipper, "country_code") or "").upper() == "GB"
-        and (provider_utils.get_value(recipient, "country_code") or "").upper()
-        == "GB"
+        _country_code(shipper) == "GB"
+        and _country_code(recipient) == "GB"
         and not _is_northern_ireland(shipper)
         and _is_northern_ireland(recipient)
     )
+
+
+def _address_residential(address):
+    """
+    Return an address residential flag without inferring from company/person data.
+
+    Important:
+    - True means residential.
+    - False means business/non-residential.
+    - None means caller did not explicitly provide the flag.
+    """
+    value = getattr(address, "residential", None)
+
+    if value is None:
+        value = provider_utils.get_value(address, "residential")
+
+    return _to_bool(value, default=None)
+
+
+def _resolve_is_recipient_a_business(shipper, recipient):
+    """
+    Resolve Royal Mail Click & Drop `isRecipientABusiness`.
+
+    Royal Mail's field is the inverse of Karrio's recipient residential flag:
+
+        recipient.residential = True   -> isRecipientABusiness = False
+        recipient.residential = False  -> isRecipientABusiness = True
+
+    The field is mandatory for business senders shipping from Great Britain to
+    Northern Ireland, but it is a valid optional CreateOrderRequest field more
+    generally. Therefore, when Karrio provides a recipient residential flag, we
+    should honor it for all shipment lanes, not just GB -> Northern Ireland.
+
+    We intentionally do not infer this from company_name.
+    """
+    recipient_residential = _address_residential(recipient)
+
+    if recipient_residential is not None:
+        return not recipient_residential
+
+    if _is_gb_to_northern_ireland(shipper, recipient):
+        raise ValueError(
+            "Royal Mail Click & Drop requires `recipient.residential` for "
+            "Great Britain to Northern Ireland shipments so that "
+            "`isRecipientABusiness` can be set accurately. Set "
+            "`recipient.residential` to `true` for residential recipients or "
+            "`false` for business recipients."
+        )
+
+    return None
 
 def _to_int(value, default=None):
     """Convert a value to int when possible."""
@@ -1615,12 +1753,12 @@ def _resolve_currency_code(
         settings.default_currency,
     )
 
-
 def _build_package(
     package,
     raw_package,
     customs,
     explicit_package_format: typing.Optional[str] = None,
+    custom_package_format_identifier: typing.Optional[str] = None,
     package_count: int = 1,
     selected_service: typing.Optional[str] = None,
 ) -> royalmail_req.PackageType:
@@ -1650,6 +1788,11 @@ def _build_package(
         shipment_explicit_package_format=explicit_package_format,
     )
 
+    resolved_custom_package_format = _resolve_package_custom_format(
+        raw_package,
+        shipment_custom_package_format=custom_package_format_identifier,
+    )
+
     resolved_package_format = provider_units.resolve_package_format(
         package=package,
         raw_package=raw_package,
@@ -1676,6 +1819,10 @@ def _build_package(
             maximum=30000,
         ),
         packageFormatIdentifier=click_and_drop_package_format,
+        customPackageFormatIdentifier=_text(
+            resolved_custom_package_format,
+            max=100,
+        ),
         dimensions=provider_units.build_dimensions(
             package,
             royalmail_req.DimensionsType,
@@ -2045,7 +2192,7 @@ def shipment_request(
     )
 
     explicit_package_format = options.package_format_identifier.state
-
+    custom_package_format_identifier = options.custom_package_format_identifier.state
     package_formats = [
         provider_units.resolve_package_format(
             package=package,
@@ -2064,14 +2211,6 @@ def shipment_request(
         selected_service,
         package_formats,
     )
-
-    package_kinds = {
-        _package_format_kind(package_format)
-        for package_format in package_formats
-        if package_format not in [None, ""]
-    }
-    shipment_package_kind = next(iter(package_kinds), None)
-
     service_code = provider_units.resolve_carrier_service(selected_service)
 
     if service_code is None:
@@ -2089,10 +2228,11 @@ def shipment_request(
         duty_paid_requested,
     )
 
-    derived_service_register_code = provider_units.resolve_service_register_code(
+    derived_service_register_code = _resolve_shipment_service_register_code(
         selected_service,
-        package_format=shipment_package_kind,
+        package_formats,
     )
+
 
     explicit_service_register_code = options.service_register_code.state
 
@@ -2269,12 +2409,14 @@ def shipment_request(
     )
     special_instructions = _resolve_special_instructions(options)
 
-    is_recipient_a_business = None
-    if (
-        _is_gb_to_northern_ireland(shipper, recipient)
-        and recipient.residential is not None
-    ):
-        is_recipient_a_business = not recipient.residential
+    is_recipient_a_business = _resolve_is_recipient_a_business(
+        shipper,
+        recipient,
+    )
+    
+            # Royal Mail requires this business declaration for GB -> Northern Ireland
+            # business-sender movements. If we check karrio for the 
+            # residential flag, 
 
     is_international = (
         (shipper.country_code or "").upper()
@@ -2353,6 +2495,9 @@ def shipment_request(
         _to_bool(options.dangerous_good.state),
     )
 
+    guaranteed_saturday_delivery = _to_bool(
+        options.guaranteed_saturday_delivery.state
+    )
     request = royalmail_req.ShipmentRequestType(
         items=[
             royalmail_req.ItemType(
@@ -2389,6 +2534,7 @@ def shipment_request(
                         raw_parcels[index] if index < len(raw_parcels) else None,
                         customs,
                         explicit_package_format,
+                        custom_package_format_identifier=custom_package_format_identifier,
                         package_count=len(packages),
                         selected_service=selected_service,
                     )
@@ -2411,6 +2557,7 @@ def shipment_request(
                     consequentialLoss=consequential_loss,
                     receiveEmailNotification=receive_email_notification,
                     receiveSmsNotification=receive_sms_notification,
+                    guaranteedSaturdayDelivery=guaranteed_saturday_delivery,
                     requestSignatureUponDelivery=request_signature_upon_delivery,
                     isLocalCollect=is_local_collect,
                     safePlace=_text(options.safe_place.state, max=90),

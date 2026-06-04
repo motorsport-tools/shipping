@@ -50,7 +50,6 @@ def empty_request(
     """Build an empty serializable request for endpoints without a body."""
     return lib.Serializable({}, lambda data: data)
 
-
 def order_lookup_request(
     payload: typing.Any,
     settings: provider_utils.Settings,
@@ -69,6 +68,8 @@ def order_lookup_request(
             payload,
             "order_identifiers",
             "orderIdentifiers",
+            "order_identifier",
+            "orderIdentifier",
             "shipment_identifier",
             "shipmentIdentifier",
             "reference",
@@ -86,14 +87,15 @@ def order_lookup_request(
     if not resolved_order_identifiers:
         raise ValueError(
             "Royal Mail Click & Drop order lookup requires "
-            "`order_identifiers`, `orderIdentifiers`, `shipment_identifier`, or `reference`"
+            "`order_identifiers`, `orderIdentifiers`, `order_identifier`, "
+            "`orderIdentifier`, `shipment_identifier`, `shipmentIdentifier`, "
+            "or `reference`"
         )
 
     return lib.Serializable(
         {"orderIdentifiers": resolved_order_identifiers},
         lambda data: data,
     )
-
 
 def orders_lookup_request(
     payload: typing.Any,

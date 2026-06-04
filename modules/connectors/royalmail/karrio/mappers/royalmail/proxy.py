@@ -3,6 +3,7 @@
 import json
 import math
 import typing
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib.parse import urlencode
 
 import attr
@@ -1162,6 +1163,270 @@ def _number_or_none(value: typing.Any) -> typing.Optional[float]:
     except (TypeError, ValueError):
         return None
 
+ROYALMAIL_LARGE_PACKAGING_CHARGE_TIERS = (
+    # Highest tier first. The rule is "order value over X", so comparisons are
+    # strict greater-than, not greater-than-or-equal.
+    (Decimal("3000.00"), Decimal("20.00")),
+    (Decimal("2000.00"), Decimal("15.00")),
+    (Decimal("1000.00"), Decimal("10.00")),
+    (Decimal("500.00"), Decimal("5.00")),
+)
+
+_MONEY_QUANT = Decimal("0.01")
+
+
+def _decimal_or_none(value: typing.Any) -> typing.Optional[Decimal]:
+    """Convert a value to Decimal, returning None when unavailable/invalid."""
+    value = _state_value(value)
+
+    if value in [None, ""]:
+        return None
+
+    if isinstance(value, bool):
+        return None
+
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+    if not amount.is_finite():
+        return None
+
+    return amount
+
+
+def _money_decimal(value: Decimal) -> Decimal:
+    """Return a two-decimal money Decimal rounded half-up."""
+    return Decimal(value).quantize(
+        _MONEY_QUANT,
+        rounding=ROUND_HALF_UP,
+    )
+
+
+def _bool_or_default(
+    value: typing.Any,
+    default: bool = False,
+) -> bool:
+    """Convert config-like values to bool with a defensive default."""
+    value = _state_value(value)
+
+    if value in [None, ""]:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    text = str(value).strip().lower()
+
+    if text in ["1", "true", "yes", "y", "on"]:
+        return True
+
+    if text in ["0", "false", "no", "n", "off"]:
+        return False
+
+    return default
+
+
+def _connection_config_value(
+    settings: typing.Any,
+    *keys: str,
+) -> typing.Any:
+    """
+    Read Royal Mail connection config values from either:
+
+    1. settings.connection_config.<option>.state
+    2. settings.config dict
+
+    This keeps the rating proxy safe across SDK-only and Karrio server usage.
+    """
+    if settings is None:
+        return None
+
+    connection_config = getattr(settings, "connection_config", None)
+
+    for key in keys:
+        option = getattr(connection_config, key, None) if connection_config else None
+        value = getattr(option, "state", None)
+
+        if value not in [None, ""]:
+            return value
+
+    config = getattr(settings, "config", {}) or {}
+
+    if isinstance(config, dict):
+        for key in keys:
+            value = config.get(key)
+
+            if value not in [None, ""]:
+                return value
+
+    return None
+
+
+def _large_packaging_charge_enabled(settings: typing.Any) -> bool:
+    """Return whether Large Packaging Charge rating is enabled by config."""
+    value = _connection_config_value(
+        settings,
+        "apply_large_packaging_charge_to_rates",
+        "applyLargePackagingChargeToRates",
+        "enable_large_packaging_charge",
+        "enableLargePackagingCharge",
+        "large_packaging_charge_enabled",
+        "largePackagingChargeEnabled",
+    )
+
+    return _bool_or_default(value, default=False)
+
+
+def _item_line_value_total(item: typing.Any) -> Decimal:
+    """
+    Return the item line value.
+
+    Preferred:
+        total_value / line_value
+
+    Fallback:
+        unit value * quantity
+
+    Karrio's commodity `value_amount` is treated as a unit value by this Royal
+    Mail connector during shipment creation, so rating uses the same convention.
+    """
+    line_value = _decimal_or_none(
+        _object_value(
+            item,
+            "total_value",
+            "totalValue",
+            "line_value",
+            "lineValue",
+            "extended_value",
+            "extendedValue",
+        )
+    )
+
+    if line_value is not None:
+        return max(line_value, Decimal("0.00"))
+
+    unit_value = _decimal_or_none(
+        _object_value(
+            item,
+            "unit_value",
+            "unitValue",
+            "value_amount",
+            "valueAmount",
+            "value",
+            "price",
+            "amount",
+        )
+    )
+
+    if unit_value is None:
+        return Decimal("0.00")
+
+    quantity = _decimal_or_none(
+        _object_value(
+            item,
+            "quantity",
+            "qty",
+        )
+    )
+
+    if quantity is None:
+        quantity = Decimal("1")
+
+    if quantity <= 0:
+        return Decimal("0.00")
+
+    return max(unit_value * quantity, Decimal("0.00"))
+
+
+def _rate_request_items_value_total(rate_request: typing.Any) -> Decimal:
+    """
+    Sum all parcel item values in the original rating request.
+
+    This intentionally uses the order's item value total rather than shipping
+    charge, subtotal option, declared value, or insurance value.
+    """
+    request_data = lib.to_dict(rate_request, clear_empty=False)
+    source = request_data if isinstance(request_data, dict) else rate_request
+
+    parcels = _object_value(
+        source,
+        "parcels",
+        "packages",
+    ) or []
+
+    if not isinstance(parcels, (list, tuple)):
+        parcels = [parcels]
+
+    total = Decimal("0.00")
+
+    for parcel in parcels:
+        items = _object_value(
+            parcel,
+            "items",
+            "commodities",
+            "contents",
+        ) or []
+
+        if not isinstance(items, (list, tuple)):
+            items = [items]
+
+        for item in items:
+            total += _item_line_value_total(item)
+
+    return _money_decimal(max(total, Decimal("0.00")))
+
+
+def _large_packaging_charge_amount_for_order_value(
+    order_value: Decimal,
+) -> Decimal:
+    """
+    Return the Large Packaging Charge amount per parcel.
+
+    Rules:
+        value > £500  -> £5 per parcel
+        value > £1000 -> £10 per parcel
+        value > £2000 -> £15 per parcel
+        value > £3000 -> £20 per parcel
+    """
+    order_value = _money_decimal(order_value or Decimal("0.00"))
+
+    for threshold, amount in ROYALMAIL_LARGE_PACKAGING_CHARGE_TIERS:
+        if order_value > threshold:
+            return amount
+
+    return Decimal("0.00")
+
+
+def _royalmail_large_packaging_charge_surcharge(
+    settings: typing.Any,
+    rate_request: typing.Any,
+) -> typing.Optional[models.Surcharge]:
+    """
+    Build the runtime Large Packaging Charge surcharge for one rated parcel.
+
+    The order value threshold is calculated once from the full order item total.
+    Because the Royal Mail rating proxy rates multi-piece shipments one parcel
+    at a time, returning a fixed surcharge here naturally applies it once per
+    parcel.
+    """
+    if not _large_packaging_charge_enabled(settings):
+        return None
+
+    order_value = _rate_request_items_value_total(rate_request)
+    amount = _large_packaging_charge_amount_for_order_value(order_value)
+
+    if amount <= Decimal("0.00"):
+        return None
+
+    return models.Surcharge(
+        id=provider_units.ROYALMAIL_LARGE_PACKAGING_CHARGE_ID,
+        name="Large Packaging Charge",
+        amount=float(amount),
+        surcharge_type="fixed",
+        active=True,
+    )
 
 def _weight_to_kg(value: typing.Any, unit: typing.Any) -> typing.Optional[float]:
     """Convert a weight value from its source unit to kilograms."""
@@ -1178,10 +1443,16 @@ def _weight_to_kg(value: typing.Any, unit: typing.Any) -> typing.Optional[float]
     if normalized_unit in ["G", "GRAM", "GRAMS"]:
         return number / 1000
 
+    if normalized_unit in ["LB", "LBS", "POUND", "POUNDS"]:
+        return number * 0.45359237
+
+    if normalized_unit in ["OZ", "OUNCE", "OUNCES"]:
+        return number * 0.028349523125
+
     return None
 
 def _parcel_weight_kg(parcel: typing.Any) -> typing.Optional[float]:
-    """Return the parcel weight in kilograms from a raw parcel/model object."""
+    """Return the declared/pre-advised parcel weight in kilograms."""
     if parcel is None:
         return None
 
@@ -1192,6 +1463,227 @@ def _parcel_weight_kg(parcel: typing.Any) -> typing.Optional[float]:
     unit = _object_value(source, "weight_unit", "weightUnit")
 
     return _weight_to_kg(weight, unit)
+
+
+def _parcel_options(parcel: typing.Any) -> typing.Any:
+    """Return parcel-level options from a raw parcel/model object."""
+    if parcel is None:
+        return {}
+
+    parcel_data = lib.to_dict(parcel, clear_empty=False)
+    source = parcel_data if isinstance(parcel_data, dict) else parcel
+
+    return _object_value(source, "options") or {}
+
+
+def _option_number(options: typing.Any, *names: str) -> typing.Optional[float]:
+    """Read the first available numeric option value."""
+    return _number_or_none(_option_value(options, *names))
+
+
+def _parcel_actual_weight_kg(parcel: typing.Any) -> typing.Optional[float]:
+    """
+    Return an optional measured/actual parcel weight in kg.
+
+    Karrio's standard parcel `weight` is used as the declared/pre-advised
+    weight. If an implementation wants to rate using a separate measured weight,
+    it can provide it in parcel options, for example:
+
+        options.actual_weight_kg = 8
+        options.actual_weight = 8000
+        options.actual_weight_unit = "G"
+    """
+    if parcel is None:
+        return None
+
+    parcel_data = lib.to_dict(parcel, clear_empty=False)
+    source = parcel_data if isinstance(parcel_data, dict) else parcel
+    options = _parcel_options(source)
+
+    actual_weight_kg = _option_number(
+        options,
+        "actual_weight_kg",
+        "actualWeightKg",
+        "measured_weight_kg",
+        "measuredWeightKg",
+        "royalmail_actual_weight_kg",
+        "royalmailActualWeightKg",
+    )
+
+    if actual_weight_kg is not None:
+        return actual_weight_kg
+
+    actual_weight = _option_value(
+        options,
+        "actual_weight",
+        "actualWeight",
+        "measured_weight",
+        "measuredWeight",
+        "royalmail_actual_weight",
+        "royalmailActualWeight",
+    )
+
+    if actual_weight in [None, ""]:
+        return None
+
+    actual_weight_unit = (
+        _option_value(
+            options,
+            "actual_weight_unit",
+            "actualWeightUnit",
+            "measured_weight_unit",
+            "measuredWeightUnit",
+            "royalmail_actual_weight_unit",
+            "royalmailActualWeightUnit",
+        )
+        or _object_value(source, "weight_unit", "weightUnit")
+    )
+
+    return _weight_to_kg(actual_weight, actual_weight_unit)
+
+
+def _parcel_explicit_chargeable_weight_kg(
+    parcel: typing.Any,
+) -> typing.Optional[float]:
+    """
+    Return an explicitly provided rating/chargeable weight in kg.
+
+    This is optional and mainly useful when a merchant has already calculated the
+    carrier chargeable weight upstream.
+    """
+    options = _parcel_options(parcel)
+
+    return _option_number(
+        options,
+        "chargeable_weight_kg",
+        "chargeableWeightKg",
+        "rating_weight_kg",
+        "ratingWeightKg",
+        "royalmail_chargeable_weight_kg",
+        "royalmailChargeableWeightKg",
+        "parcelforce_chargeable_weight_kg",
+        "parcelforceChargeableWeightKg",
+    )
+
+
+def _parcel_volumetric_divisor(parcel: typing.Any) -> float:
+    """
+    Return the volumetric divisor in cm³/kg.
+
+    Parcelforce's common divisor is 5000. Allowing an option-level override keeps
+    the connector flexible if a contract/account requires a different divisor.
+    """
+    options = _parcel_options(parcel)
+
+    divisor = _option_number(
+        options,
+        "volumetric_divisor",
+        "volumetricDivisor",
+        "volumetric_divisor_cm3_per_kg",
+        "volumetricDivisorCm3PerKg",
+        "royalmail_volumetric_divisor",
+        "royalmailVolumetricDivisor",
+        "parcelforce_volumetric_divisor",
+        "parcelforceVolumetricDivisor",
+    )
+
+    if divisor is None or divisor <= 0:
+        return ROYALMAIL_PARCELFORCE_VOLUMETRIC_DIVISOR_CM3_PER_KG
+
+    return divisor
+
+
+def _parcel_dimensions_cm(
+    parcel: typing.Any,
+) -> typing.Optional[typing.Tuple[float, float, float]]:
+    """
+    Return parcel dimensions in centimetres.
+
+    For irregular parcels, callers should provide the dimensions of the smallest
+    cubic/cuboid shape the parcel fits into.
+    """
+    if parcel is None:
+        return None
+
+    parcel_data = lib.to_dict(parcel, clear_empty=False)
+    source = parcel_data if isinstance(parcel_data, dict) else parcel
+
+    dimension_unit = _object_value(source, "dimension_unit", "dimensionUnit")
+
+    if dimension_unit in [None, ""]:
+        return None
+
+    length = _dimension_to_cm(_object_value(source, "length"), dimension_unit)
+    width = _dimension_to_cm(_object_value(source, "width"), dimension_unit)
+    height = _dimension_to_cm(_object_value(source, "height"), dimension_unit)
+
+    dimensions = [length, width, height]
+
+    if any(value is None for value in dimensions):
+        return None
+
+    if any(float(value) <= 0 for value in dimensions):
+        return None
+
+    return float(length), float(width), float(height)
+
+
+def _parcel_volumetric_weight_kg(parcel: typing.Any) -> typing.Optional[float]:
+    """
+    Return the Parcelforce volumetric weight in kg.
+
+    Formula:
+
+        length_cm * width_cm * height_cm / 5000
+
+    The divisor can be overridden with parcel options if required by a contract.
+    """
+    dimensions = _parcel_dimensions_cm(parcel)
+
+    if dimensions is None:
+        return None
+
+    length_cm, width_cm, height_cm = dimensions
+    divisor = _parcel_volumetric_divisor(parcel)
+
+    if divisor <= 0:
+        return None
+
+    return (length_cm * width_cm * height_cm) / divisor
+
+
+def _parcel_chargeable_weight_kg(parcel: typing.Any) -> typing.Optional[float]:
+    """
+    Return the parcel chargeable weight used for local Royal Mail rating.
+
+    For Parcelforce International rating, use the greatest of:
+
+    - declared/pre-advised parcel weight;
+    - actual/measured parcel weight, when supplied;
+    - explicit upstream chargeable weight, when supplied;
+    - volumetric weight from dimensions.
+
+    Important:
+    This value is for rating only. It must not replace the Click & Drop
+    `weightInGrams` value used for order creation.
+    """
+    candidates = [
+        _parcel_weight_kg(parcel),
+        _parcel_actual_weight_kg(parcel),
+        _parcel_explicit_chargeable_weight_kg(parcel),
+        _parcel_volumetric_weight_kg(parcel),
+    ]
+
+    candidates = [
+        float(value)
+        for value in candidates
+        if value is not None and float(value) > 0
+    ]
+
+    if not any(candidates):
+        return None
+
+    return max(candidates)
 
 def _rate_request_destination_country_code(
     rate_request: typing.Any,
@@ -1407,7 +1899,7 @@ def _royalmail_oversized_surcharge(
     if rate_per_kg in [None, 0]:
         return None
 
-    weight_kg = _parcel_weight_kg(parcel)
+    weight_kg = _parcel_chargeable_weight_kg(parcel)
 
     if weight_kg is None:
         return None
@@ -1444,10 +1936,15 @@ def _royalmail_oversized_rating_target_max_weight_kg(
     destination_country_code: typing.Optional[str] = None,
 ) -> typing.Optional[float]:
     """
-    Return the max weight to expose to universal rating for overweight pricing.
+    Return the max weight to expose to universal rating for this parcel.
 
     Without this, services whose normal max_weight is 30kg would be rejected
     before the oversized surcharge can be applied.
+
+    Important:
+    A configured `oversized_surcharge_max_weight_kg` is a hard cap, not the
+    runtime synthetic zone weight. The synthetic zone should only be expanded
+    to the current parcel's chargeable weight.
     """
     metadata = getattr(service, "metadata", {}) or {}
 
@@ -1462,7 +1959,7 @@ def _royalmail_oversized_rating_target_max_weight_kg(
     if rate_per_kg in [None, 0]:
         return None
 
-    weight_kg = _parcel_weight_kg(parcel)
+    weight_kg = _parcel_chargeable_weight_kg(parcel)
 
     if weight_kg is None:
         return None
@@ -1474,11 +1971,8 @@ def _royalmail_oversized_rating_target_max_weight_kg(
 
     max_weight_kg = _royalmail_oversized_surcharge_max_weight_kg(metadata)
 
-    if max_weight_kg is not None:
-        if weight_kg > max_weight_kg:
-            return None
-
-        return max_weight_kg
+    if max_weight_kg is not None and weight_kg > max_weight_kg:
+        return None
 
     return weight_kg
 
@@ -1607,6 +2101,8 @@ def _royalmail_oversized_top_rate_zone(
     )[3]
 
 ROYALMAIL_UNIVERSAL_RATING_WEIGHT_EPSILON_KG = 0.01
+ROYALMAIL_PARCELFORCE_VOLUMETRIC_DIVISOR_CM3_PER_KG = 5000.0
+
 
 
 def _universal_rating_exclusive_max_weight_kg(
@@ -1795,14 +2291,34 @@ def _dimension_to_cm(value: typing.Any, unit: typing.Any) -> typing.Optional[flo
 
     normalized_unit = str(unit).strip().upper()
 
-    if normalized_unit in ["CM", "CMS", "CENTIMETRE", "CENTIMETRES", "CENTIMETER", "CENTIMETERS"]:
+    if normalized_unit in [
+        "CM",
+        "CMS",
+        "CENTIMETRE",
+        "CENTIMETRES",
+        "CENTIMETER",
+        "CENTIMETERS",
+    ]:
         return number
 
-    if normalized_unit in ["MM", "MMS", "MILLIMETRE", "MILLIMETRES", "MILLIMETER", "MILLIMETERS"]:
+    if normalized_unit in [
+        "MM",
+        "MMS",
+        "MILLIMETRE",
+        "MILLIMETRES",
+        "MILLIMETER",
+        "MILLIMETERS",
+    ]:
         return number / 10
 
     if normalized_unit in ["M", "METRE", "METRES", "METER", "METERS"]:
         return number * 100
+
+    if normalized_unit in ["IN", "INS", "INCH", "INCHES"]:
+        return number * 2.54
+
+    if normalized_unit in ["FT", "FOOT", "FEET"]:
+        return number * 30.48
 
     return None
 
@@ -1951,6 +2467,8 @@ def _with_active_royalmail_surcharges(
     options: typing.Any = None,
     parcel: typing.Any = None,
     destination_country_code: typing.Optional[str] = None,
+    settings: typing.Any = None,
+    rate_request: typing.Any = None,
 ) -> models.ServiceLevel:
     """
     Return a service copy with:
@@ -1958,9 +2476,13 @@ def _with_active_royalmail_surcharges(
     1. Date-active Royal Mail surcharges, such as Peak.
     2. Option-triggered feature surcharges, such as Signature on delivery.
     3. Parcel-specific Parcelforce oversized surcharge.
+    4. Optional order-value Large Packaging Charge.
 
     The Parcelforce oversized surcharge may be destination-specific for
     international Parcelforce services.
+
+    The Large Packaging Charge is connection-config controlled and calculated
+    from the full order item value total, then applied once per rated parcel.
     """
     service = _with_royalmail_oversized_rating_limits(
         service,
@@ -1999,13 +2521,37 @@ def _with_active_royalmail_surcharges(
         destination_country_code=destination_country_code,
     )
 
-    dynamic_surcharges = []
+    large_packaging_surcharge = _royalmail_large_packaging_charge_surcharge(
+        settings,
+        rate_request,
+    )
 
-    if oversized_surcharge is not None and not any(
-        surcharge.id == oversized_surcharge.id
-        for surcharge in active_surcharges
-    ):
-        dynamic_surcharges.append(oversized_surcharge)
+    dynamic_surcharges = []
+    existing_surcharge_ids = {
+        surcharge.id
+        for surcharge in [
+            *active_surcharges,
+            *option_surcharges,
+        ]
+        if getattr(surcharge, "id", None) not in [None, ""]
+    }
+
+    for surcharge in [
+        oversized_surcharge,
+        large_packaging_surcharge,
+    ]:
+        if surcharge is None:
+            continue
+
+        surcharge_id = getattr(surcharge, "id", None)
+
+        if surcharge_id in existing_surcharge_ids:
+            continue
+
+        dynamic_surcharges.append(surcharge)
+
+        if surcharge_id not in [None, ""]:
+            existing_surcharge_ids.add(surcharge_id)
 
     return attr.evolve(
         service,
@@ -2016,46 +2562,44 @@ def _with_active_royalmail_surcharges(
         ],
     )
 
+
 def _settings_for_universal_rating(
     settings: provider_settings.Settings,
     rate_request: typing.Any = None,
     parcel: typing.Any = None,
+    services: typing.Optional[typing.Iterable[models.ServiceLevel]] = None,
 ) -> provider_settings.Settings:
     """
-    Return a copy of settings with Royal Mail service dimensions normalized for
-    local universal-rating only.
+    Return a settings copy prepared for Karrio universal rating.
 
-    This also injects option-triggered feature surcharges, e.g.:
+    This normalizes Royal Mail service dimensions and injects runtime surcharges.
 
-        options.signature_confirmation = true
-        service.metadata.signature_surcharge_amount = 2.00
-        -> add GBP 2.00 Signature on delivery to the local rate.
+    `services` may be supplied by the rating proxy when it runs separate rating
+    passes, for example:
 
-    It also injects parcel-specific Parcelforce oversized surcharges, e.g.:
-
-        parcel.weight = 35kg
-        service.metadata.oversized_surcharge_threshold_kg = 30
-        service.metadata.oversized_surcharge_amount_per_kg = 10
-        -> add GBP 50.00 Parcelforce Oversized Surcharge
+    - normal declared-weight services;
+    - Parcelforce chargeable-weight services.
 
     Important:
-    Use settings.shipping_services instead of settings.services so local rating
-    respects connection-level `config.shipping_services` whitelists while still
-    preserving the explicit-empty-services case.
+    Use settings.shipping_services when services is not explicitly supplied so
+    connection-level `config.shipping_services` allow-lists are still respected.
     """
     surcharge_date = _rate_request_surcharge_date(rate_request)
     options = _request_value(rate_request, "options", {}) or {}
     destination_country_code = _rate_request_destination_country_code(rate_request)
 
-    runtime_services = getattr(settings, "shipping_services", None)
+    if services is not None:
+        runtime_services = list(services or [])
+    else:
+        runtime_services = getattr(settings, "shipping_services", None)
 
-    if runtime_services is None:
-        raw_services = (
-            settings.services
-            if settings.services is not None
-            else provider_units.DEFAULT_SERVICES
-        )
-        runtime_services = provider_units.active_service_levels(raw_services)
+        if runtime_services is None:
+            raw_services = (
+                settings.services
+                if settings.services is not None
+                else provider_units.DEFAULT_SERVICES
+            )
+            runtime_services = provider_units.active_service_levels(raw_services)
 
     return attr.evolve(
         settings,
@@ -2067,32 +2611,26 @@ def _settings_for_universal_rating(
                     options=options,
                     parcel=parcel,
                     destination_country_code=destination_country_code,
+                    settings=settings,
+                    rate_request=rate_request,
                 )
             )
             for service in list(runtime_services or [])
         ],
     )
 
-def _normalize_rate_parcel_for_universal_rating(parcel: typing.Any) -> dict:
+def _normalize_rate_parcel_for_universal_rating(
+    parcel: typing.Any,
+    use_chargeable_weight: bool = False,
+) -> dict:
     """
     Normalize Royal Mail metric parcel inputs before using Karrio's universal
     rating engine.
 
-    This handles two Royal Mail/Karrio compatibility issues:
-
-    1. Unit compatibility:
-       Karrio universal Package collection treats KG as the safe metric rating
-       weight unit. A parcel declared in G can be routed through imperial
-       conversions internally, which can cause boundary rounding issues.
-
-    2. Dimension orientation:
-       Royal Mail package limits are orientation-independent, while Karrio
-       universal rating checks length/width/height positionally. The Royal Mail
-       service catalog stores dimensions as middle/longest/shortest, so the
-       request parcel is normalized into that same convention before rating.
-
-    The original request is still used later for Royal Mail package-format
-    detection and filtering.
+    `use_chargeable_weight=True` must only be used for Parcelforce International
+    chargeable-weight rating passes. Do not enable it globally, otherwise
+    Royal Mail domestic/international services will be rated with Parcelforce
+    volumetric weight.
     """
     parcel_data = lib.to_dict(parcel, clear_empty=False)
 
@@ -2101,13 +2639,24 @@ def _normalize_rate_parcel_for_universal_rating(parcel: typing.Any) -> dict:
 
     normalized = dict(parcel_data)
 
-    weight_unit = normalized.get("weight_unit") or normalized.get("weightUnit")
-    weight_kg = _weight_to_kg(normalized.get("weight"), weight_unit)
+    chargeable_weight_kg = (
+        _parcel_chargeable_weight_kg(parcel)
+        if use_chargeable_weight
+        else None
+    )
 
-    if weight_kg is not None:
-        normalized["weight"] = weight_kg
+    if chargeable_weight_kg is not None:
+        normalized["weight"] = chargeable_weight_kg
         normalized["weight_unit"] = "KG"
         normalized.pop("weightUnit", None)
+    else:
+        weight_unit = normalized.get("weight_unit") or normalized.get("weightUnit")
+        weight_kg = _weight_to_kg(normalized.get("weight"), weight_unit)
+
+        if weight_kg is not None:
+            normalized["weight"] = weight_kg
+            normalized["weight_unit"] = "KG"
+            normalized.pop("weightUnit", None)
 
     dimension_unit = normalized.get("dimension_unit") or normalized.get("dimensionUnit")
 
@@ -2144,15 +2693,15 @@ def _normalize_rate_parcel_for_universal_rating(parcel: typing.Any) -> dict:
 
     return normalized
 
-
 def _normalize_rate_request_for_universal_rating(
     rate_request: typing.Any,
+    use_chargeable_weight: bool = False,
 ) -> models.RateRequest:
     """
     Return a metric-normalized RateRequest for Karrio universal rating.
 
-    The original request should still be used for Royal Mail-specific
-    package-format detection/filtering.
+    `use_chargeable_weight=True` should only be used in the Parcelforce
+    chargeable-weight rating pass.
     """
     request_data = lib.to_dict(rate_request, clear_empty=False)
 
@@ -2163,11 +2712,37 @@ def _normalize_rate_request_for_universal_rating(
 
     if isinstance(parcels, list):
         request_data["parcels"] = [
-            _normalize_rate_parcel_for_universal_rating(parcel)
+            _normalize_rate_parcel_for_universal_rating(
+                parcel,
+                use_chargeable_weight=use_chargeable_weight,
+            )
             for parcel in parcels
         ]
 
     return models.RateRequest(**request_data)
+
+def _service_uses_parcelforce_chargeable_weight(
+    service: models.ServiceLevel,
+) -> bool:
+    """
+    Return whether this service should be rated with Parcelforce chargeable weight.
+
+    Chargeable-weight rating should be scoped to Parcelforce International
+    services that use the sidecar table / additional-kg-after-30kg model.
+    """
+    service_code = str(getattr(service, "service_code", "") or "").strip().lower()
+    metadata = getattr(service, "metadata", {}) or {}
+
+    if not service_code.startswith("parcel_force"):
+        return False
+
+    if not isinstance(metadata, dict):
+        return False
+
+    if metadata.get("oversized_surcharge_amount_per_kg_by_country"):
+        return True
+
+    return _royalmail_oversized_surcharge_rate_per_kg(metadata) is not None
 
 def _rate_request_package_formats(rate_request: typing.Any) -> typing.List[str]:
     """
@@ -2297,6 +2872,150 @@ def _requested_rate_services(rate_request: typing.Any) -> typing.Set[str]:
                 resolved.add(resolved_service)
 
     return resolved
+
+def _rating_pass_services(
+    settings: provider_settings.Settings,
+    rate_request: typing.Any,
+    use_chargeable_weight: bool,
+) -> typing.List[models.ServiceLevel]:
+    """
+    Return the services that should be included in one rating pass.
+
+    Karrio's universal rating engine uses one package weight for all services in
+    a pass. Royal Mail therefore needs two passes:
+
+    1. Normal declared-weight pass:
+       Royal Mail domestic, Royal Mail international, and any service that does
+       not use Parcelforce chargeable-weight pricing.
+
+    2. Parcelforce chargeable-weight pass:
+       Parcelforce International services that use volumetric/chargeable weight.
+
+    Explicit requested services are respected. This also avoids the universal
+    rating mixin's behavior where an empty selected-service intersection can
+    accidentally become "rate all services in this settings object".
+    """
+    runtime_services = list(getattr(settings, "shipping_services", None) or [])
+    requested_service_codes = _requested_rate_services(rate_request)
+
+    if any(requested_service_codes):
+        runtime_services = [
+            service
+            for service in runtime_services
+            if getattr(service, "service_code", None) in requested_service_codes
+        ]
+
+    return [
+        service
+        for service in runtime_services
+        if _service_uses_parcelforce_chargeable_weight(service)
+        is use_chargeable_weight
+    ]
+
+
+def _merge_rating_pass_responses(
+    pass_responses: typing.Iterable[typing.List[typing.Tuple[str, typing.Any]]],
+) -> typing.List[typing.Tuple[str, typing.Any]]:
+    """
+    Merge normal-weight and chargeable-weight rating pass responses.
+
+    Each pass returns package references with `(rates, messages)`. Services are
+    split between passes, so rate duplication should not occur. Messages are
+    concatenated.
+    """
+    merged: typing.Dict[str, dict] = {}
+    order: typing.List[str] = []
+
+    for response in pass_responses or []:
+        for reference, package_result in response or []:
+            key = str(reference)
+
+            if key not in merged:
+                order.append(key)
+                merged[key] = {
+                    "reference": reference,
+                    "rates": [],
+                    "messages": [],
+                }
+
+            rates, messages = package_result
+
+            merged[key]["rates"].extend(list(rates or []))
+            merged[key]["messages"].extend(list(messages or []))
+
+    return [
+        (
+            merged[key]["reference"],
+            (
+                merged[key]["rates"],
+                merged[key]["messages"],
+            ),
+        )
+        for key in order
+    ]
+
+
+def _rate_request_with_service_passes(
+    settings: provider_settings.Settings,
+    original_rate_request: typing.Any,
+    rate_request: typing.Any,
+    parcel: typing.Any = None,
+) -> typing.List[typing.Tuple[str, typing.Any]]:
+    """
+    Rate one request using separate normal and Parcelforce chargeable-weight passes.
+
+    `original_rate_request` is used for options/date/destination context.
+    `rate_request` may already be service-normalized and/or reduced to one parcel.
+    """
+    pass_responses = []
+
+    for use_chargeable_weight in [False, True]:
+        pass_services = _rating_pass_services(
+            settings,
+            rate_request,
+            use_chargeable_weight=use_chargeable_weight,
+        )
+
+        if not any(pass_services):
+            continue
+
+        normalized_request = lib.Serializable(
+            _normalize_rate_request_for_universal_rating(
+                rate_request,
+                use_chargeable_weight=use_chargeable_weight,
+            )
+        )
+
+        pass_response = rating_proxy.RatingMixinProxy(
+            settings=_settings_for_universal_rating(
+                settings,
+                rate_request=original_rate_request,
+                parcel=parcel,
+                services=pass_services,
+            ),
+        ).get_rates(normalized_request).deserialize()
+
+        pass_responses.append(pass_response)
+
+    if any(pass_responses):
+        return _merge_rating_pass_responses(pass_responses)
+
+    # Preserve package-level response shape even when no services are available.
+    empty_request = lib.Serializable(
+        _normalize_rate_request_for_universal_rating(
+            rate_request,
+            use_chargeable_weight=False,
+        )
+    )
+
+    return rating_proxy.RatingMixinProxy(
+        settings=_settings_for_universal_rating(
+            settings,
+            rate_request=original_rate_request,
+            parcel=parcel,
+            services=[],
+        ),
+    ).get_rates(empty_request).deserialize()
 
 def _rate_request_insurance_amount(
     rate_request: typing.Any,
@@ -3089,6 +3808,48 @@ def _with_royalmail_compensation_rate_meta(
         },
     )
 
+def _rate_service_supports_package_format(
+    service: typing.Any,
+    package_format: typing.Optional[str],
+) -> bool:
+    """
+    Rating-only Royal Mail package-format compatibility check.
+
+    Shipment creation must be strict because Click & Drop needs the correct
+    packageFormatIdentifier + serviceRegisterCode pair.
+
+    Rating is slightly different: a physical Royal Mail `letter` can be rated
+    against `largeLetter` services because the parcel dimensions fit inside the
+    large-letter band.
+
+    This matters for tracked-service filtering:
+
+        request package format = letter
+        required feature       = tracked
+
+    Royal Mail tracked domestic products are generally largeLetter/parcel
+    products, not separate `letter` register-code products. If we require
+    `TPN24 + letter` to have its own serviceRegisterCode, we incorrectly remove
+    all tracked rates.
+    """
+    if provider_units.service_supports_package_format(
+        service,
+        package_format,
+    ):
+        return True
+
+    requested_kind = provider_units._package_format_register_kind(package_format)
+
+    # Rating-only fallback:
+    # A Letter-shaped item can use Large Letter services.
+    if requested_kind == "letter":
+        return provider_units.service_supports_package_format(
+            service,
+            provider_units.PackagingType.large_letter.value,
+        )
+
+    return False
+
 def _filter_package_rates_by_package_format(
     response: typing.List[typing.Tuple[str, typing.Any]],
     rate_request: typing.Any,
@@ -3140,7 +3901,7 @@ def _filter_package_rates_by_package_format(
         package_filtered_rates = [
             rate
             for rate in rates
-            if provider_units.service_supports_package_format(
+            if _rate_service_supports_package_format(
                 rate.service,
                 package_format,
             )
@@ -3334,15 +4095,19 @@ def _filter_package_rates_by_package_format(
 class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
     """Royal Mail HTTP proxy that sends serialized Karrio requests to carrier APIs."""
     settings: provider_settings.Settings
-
     def get_rates(self, request: lib.Serializable) -> lib.Deserializable[dict]:
         """
         Rate Royal Mail services locally using Karrio universal rating tables.
 
-        The Parcelforce oversized surcharge is parcel-specific, so multi-piece
-        requests are rated one parcel at a time with parcel-specific service copies.
-        This prevents a 35kg parcel surcharge being incorrectly applied to a 5kg
-        parcel in the same request.
+        Royal Mail needs service-scoped rating passes:
+
+        - normal Royal Mail services use declared/pre-advised parcel weight;
+        - Parcelforce International chargeable-weight services use the greatest of
+        declared weight, measured/actual weight, explicit chargeable weight, and
+        volumetric weight.
+
+        Multi-piece requests are still rated one parcel at a time because dynamic
+        Parcelforce surcharges are parcel-specific.
         """
         original_rate_request = request.serialize()
 
@@ -3371,28 +4136,20 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
             else None
         ) or service_parcels
 
-        # Single parcel / empty parcel fallback keeps the previous behaviour while
-        # still passing the parcel into settings so the overweight surcharge works.
+        # Single parcel / empty parcel fallback.
         if not isinstance(service_parcels, list) or len(service_parcels) <= 1:
             parcel = (
                 original_parcels[0]
                 if isinstance(original_parcels, list) and len(original_parcels) > 0
-                else None
+                else original_parcels
             )
 
-            normalized_request = lib.Serializable(
-                _normalize_rate_request_for_universal_rating(
-                    service_normalized_request
-                )
+            response = _rate_request_with_service_passes(
+                self.settings,
+                original_rate_request=original_rate_request,
+                rate_request=service_normalized_request,
+                parcel=parcel,
             )
-
-            response = rating_proxy.RatingMixinProxy(
-                settings=_settings_for_universal_rating(
-                    self.settings,
-                    rate_request=original_rate_request,
-                    parcel=parcel,
-                ),
-            ).get_rates(normalized_request).deserialize()
 
             return lib.Deserializable(
                 _filter_package_rates_by_package_format(
@@ -3416,19 +4173,12 @@ class Proxy(rating_proxy.RatingMixinProxy, proxy.Proxy):
                 "parcels": [service_parcel],
             }
 
-            normalized_request = lib.Serializable(
-                _normalize_rate_request_for_universal_rating(
-                    models.RateRequest(**parcel_request_data)
-                )
+            parcel_response = _rate_request_with_service_passes(
+                self.settings,
+                original_rate_request=original_rate_request,
+                rate_request=models.RateRequest(**parcel_request_data),
+                parcel=original_parcel,
             )
-
-            parcel_response = rating_proxy.RatingMixinProxy(
-                settings=_settings_for_universal_rating(
-                    self.settings,
-                    rate_request=original_rate_request,
-                    parcel=original_parcel,
-                ),
-            ).get_rates(normalized_request).deserialize()
 
             package_reference = _rate_package_reference(
                 original_parcel,

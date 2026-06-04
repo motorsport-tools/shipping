@@ -20,22 +20,17 @@ PARCELFORCE_WEIGHT_BAND_RE = re.compile(
     re.IGNORECASE,
 )
 
-# The sidecar table contains ECA/GPA/ER3 rows, but the current Karrio catalogue
-# tests expect ECA/GPA to remain grouped Royal Mail zone services:
+# The sidecar table contains ECA/GPA/ERA 
+# THESE ARE HARDCODED FOR NOW
+
 #
-#   ECA -> parcel_force_europe -> Europe Zone 1/2/3
-#   GPA -> parcel_force_globalpriority_row -> World Zone 1/2/3
-#
-# ER3 is the service currently expected to use detailed country-specific
-# Parcelforce sidecar rate bands.
-#
-# Future services can opt in via a CSV column such as:
+# Future services can opt in OR OUT via a CSV column such as:
 #   use_parcelforce_sidecar_rates=True
 PARCELFORCE_SIDECAR_RATE_TABLE_SERVICE_CODES = frozenset(
     [
         "ECA",
         "GPA",
-        "ER3",
+        "ERA",
     ]
 )
 
@@ -73,8 +68,10 @@ def _base_row_uses_parcelforce_sidecar_rates(
     Return whether a services.csv row should be replaced by detailed sidecar
     rate bands.
 
-    By default, only ER3 uses the detailed Parcelforce sidecar table. ECA/GPA
-    remain grouped-zone catalogue services because existing service tests expect
+    By default, only the 3 international services ERA uses the detailed Parcelforce 
+    sidecar table. if you disable the sidecar they will revert to 
+    grouped-zone catalogue services I have test to cope with this but the test should
+    only be enabled if sidecar loading is disabled because existing service tests for ECA/GPA expect
     their zones to be Europe Zone 1/2/3 and World Zone 1/2/3 respectively.
     """
     explicit = _row_value(

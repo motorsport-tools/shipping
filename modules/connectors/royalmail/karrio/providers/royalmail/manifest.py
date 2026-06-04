@@ -132,12 +132,11 @@ def manifest_request(
 
     return lib.Serializable(request, lib.to_dict)
 
-
 def manifest_identifier_request(
     payload: typing.Any,
     settings: provider_utils.Settings,
 ) -> lib.Serializable:
-    """Build a manifest lookup or retry request from a manifest identifier."""
+    """Build a manifest lookup or retry request from a numeric manifest identifier."""
     manifest_identifier = (
         payload
         if isinstance(payload, (str, int))
@@ -151,10 +150,20 @@ def manifest_identifier_request(
     if manifest_identifier in [None, ""]:
         raise ValueError(
             "Royal Mail Click & Drop manifest lookup requires "
-            "`manifest_identifier`, `manifestIdentifier`, `manifest_number`, or `reference`"
+            "`manifest_identifier`, `manifestIdentifier`, `manifest_number`, "
+            "`manifestNumber`, or `reference`"
+        )
+
+    manifest_identifier_text = str(manifest_identifier).strip()
+
+    if not manifest_identifier_text.isdigit():
+        raise ValueError(
+            "Royal Mail Click & Drop `manifestIdentifier` must be numeric. "
+            "The Click & Drop API defines `/manifests/{manifestIdentifier}` "
+            "and `/manifests/retry/{manifestIdentifier}` as integer path parameters."
         )
 
     return lib.Serializable(
-        {"manifestIdentifier": manifest_identifier},
+        {"manifestIdentifier": int(manifest_identifier_text)},
         lambda data: data,
     )

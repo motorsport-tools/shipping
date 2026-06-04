@@ -24,7 +24,9 @@ def _normalize_item(item: typing.Any) -> dict:
         or provider_utils.get_value(item, "order_identifier"),
         "orderReference": provider_utils.get_value(item, "orderReference")
         or provider_utils.get_value(item, "order_reference"),
-        "status": provider_utils.get_value(item, "status"),
+        "status": provider_utils.get_value(item, "status")
+        or provider_utils.get_value(item, "orderStatus")
+        or provider_utils.get_value(item, "order_status"),
         "trackingNumber": provider_utils.get_value(item, "trackingNumber")
         or provider_utils.get_value(item, "tracking_number"),
         "despatchDate": provider_utils.to_datetime_string(

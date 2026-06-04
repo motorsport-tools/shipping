@@ -181,12 +181,19 @@ ROYALMAIL_SIGNATURE_SURCHARGE_ID = "royalmail_signature_on_delivery"
 ROYALMAIL_AGE_VERIFICATION_SURCHARGE_ID = "royalmail_age_verification"
 ROYALMAIL_ID_VERIFICATION_SURCHARGE_ID = "royalmail_id_verification"
 
+# Runtime order-value surcharge.
+#
+# This is not loaded from services.csv because the final amount depends on the
+# full order item value total and is charged once per parcel during rating.
+ROYALMAIL_LARGE_PACKAGING_CHARGE_ID = "royalmail_large_packaging_charge"
+
 ROYALMAIL_SURCHARGE_IDS = {
     ROYALMAIL_FUEL_ENERGY_SURCHARGE_ID,
     ROYALMAIL_PARCELFORCE_FUEL_ENERGY_SURCHARGE_ID,
     ROYALMAIL_GREEN_SURCHARGE_ID,
     ROYALMAIL_PEAK_SURCHARGE_ID,
     ROYALMAIL_PARCELFORCE_OVERSIZED_SURCHARGE_ID,
+    ROYALMAIL_LARGE_PACKAGING_CHARGE_ID,
 }
 
 # Royal Mail published UK domestic peak window:
@@ -1434,6 +1441,104 @@ def _infer_package_format_register_kind(row: dict) -> typing.Optional[str]:
 
     return "parcel"
 
+def _row_package_format_register_kind(row: dict) -> typing.Optional[str]:
+    """
+    Resolve the Royal Mail service-register package kind for one services.csv row.
+
+    Important:
+    Prefer the explicit Click & Drop package_format_identifier column over
+    dimension inference.
+
+    This matters for Royal Mail product-family service codes such as TPN24 where
+    a row may explicitly be `largeLetter` even though its limits look parcel-like
+    in the CSV.
+
+    Example:
+        TPN24 + largeLetter -> serviceRegisterCode 01
+        TPN24 + parcel      -> serviceRegisterCode 02
+    """
+    explicit_package_format = _row_value(
+        row,
+        "package_format_identifier",
+        "packageFormatIdentifier",
+    )
+
+    explicit_package_format_kind = _package_format_register_kind(
+        explicit_package_format
+    )
+
+    if explicit_package_format_kind not in [None, ""]:
+        return explicit_package_format_kind
+
+    return _infer_package_format_register_kind(row)
+def _service_register_codes_by_package_format_kind(row: dict) -> dict[str, str]:
+    """
+    Return serviceRegisterCode mappings from one raw services.csv row.
+
+    This is required for Click & Drop product-family serviceCode values such as
+    TPN24 where the Royal Mail serviceCode is the same but the
+    serviceRegisterCode depends on package format:
+
+        TPN24 + largeLetter -> 01
+        TPN24 + parcel      -> 02
+    """
+    service_register_code = str(
+        _row_value(
+            row,
+            "service_register_code",
+            "serviceRegisterCode",
+        )
+        or ""
+    ).strip()
+
+    if service_register_code == "":
+        return {}
+
+    package_format_kind = _row_package_format_register_kind(row)
+
+    if package_format_kind in [None, ""]:
+        return {}
+
+    return {
+        package_format_kind: service_register_code,
+    }
+
+def _merge_service_register_codes_metadata(
+    metadata: dict,
+    row: dict,
+) -> None:
+    """
+    Merge raw row register-code mappings into an existing ServiceLevel metadata
+    object.
+
+    `load_services_from_csv()` merges duplicate service_code rows. Without this
+    merge, only the first row's serviceRegisterCode survives.
+    """
+    if not isinstance(metadata, dict):
+        return
+
+    row_register_codes = _service_register_codes_by_package_format_kind(row)
+
+    if not row_register_codes:
+        return
+
+    register_codes_by_kind = metadata.setdefault(
+        "service_register_codes_by_package_format_kind",
+        {},
+    )
+
+    if not isinstance(register_codes_by_kind, dict):
+        register_codes_by_kind = {}
+        metadata["service_register_codes_by_package_format_kind"] = (
+            register_codes_by_kind
+        )
+
+    for package_format_kind, service_register_code in row_register_codes.items():
+        register_codes_by_kind.setdefault(
+            package_format_kind,
+            service_register_code,
+        )
+
 def _infer_package_format_identifier(row: dict) -> typing.Optional[str]:
     """
     Infer the exact Royal Mail packageFormatIdentifier from service limits.
@@ -1708,6 +1813,20 @@ def _service_metadata(row: dict) -> dict:
             "service_register_code",
             "serviceRegisterCode",
         ),
+
+        # Package-format-specific register-code map.
+        #
+        # This is critical for product-family Click & Drop serviceCode values where
+        # the same serviceCode uses different serviceRegisterCode values depending on
+        # package format.
+        #
+        # Example:
+        #   TPN24 + largeLetter -> 01
+        #   TPN24 + parcel      -> 02
+        "service_register_codes_by_package_format_kind": (
+            _service_register_codes_by_package_format_kind(row)
+        ),
+
         "consequential_loss": _to_int(
             _row_value(row, "consequential_loss", "consequentialLoss")
         ),
@@ -2382,6 +2501,22 @@ def load_services_from_csv(
 
         service_data = services_by_code[service_code]
 
+        # Merge package-format-specific serviceRegisterCode metadata from duplicate
+        # services.csv rows.
+        #
+        # This is required for Click & Drop product-family serviceCode values such as
+        # TPN24:
+        #
+        #   royal_mail_tracked_24 / TPN24 / largeLetter / 01
+        #   royal_mail_tracked_24 / TPN24 / smallParcel / 02
+        #
+        # The ServiceLevel is merged by service_code, but the register-code mappings
+        # must all survive.
+        _merge_service_register_codes_metadata(
+            service_data.setdefault("metadata", {}),
+            row,
+        )
+
         # Keep the merged service inactive if any explicit row is inactive.
         #
         # Parcelforce sidecar placeholder rows were removed before this point,
@@ -2709,6 +2844,149 @@ def shipping_services_initializer(
 
     return units.Services(requested_services, ShippingService)
 
+def _iter_raw_service_csv_rows(
+    csv_path: pathlib.Path = SERVICES_CSV,
+) -> typing.Iterator[dict]:
+    """Yield raw services.csv rows without merging duplicate service_code rows."""
+    csv_path = pathlib.Path(csv_path)
+
+    if not csv_path.exists():
+        return
+
+    with open(csv_path, newline="", encoding="utf-8-sig") as csvfile:
+        yield from csv.DictReader(csvfile)
+
+
+def _service_register_by_raw_csv_carrier_and_format_index(
+    csv_path: pathlib.Path = SERVICES_CSV,
+    *,
+    active_only: bool = False,
+) -> dict[tuple[str, str], str]:
+    """
+    Index serviceRegisterCode values from raw services.csv rows.
+
+    This raw-row index is required because Karrio merges duplicate service_code
+    rows into one ServiceLevel, while Royal Mail Click & Drop can use the same
+    serviceCode with different serviceRegisterCode values by package format.
+
+    Example:
+        TPN24 + largeLetter -> 01
+        TPN24 + parcel      -> 02
+    """
+    index: dict[tuple[str, str], str] = {}
+
+    for row in _iter_raw_service_csv_rows(csv_path):
+        if active_only and not is_active_flag(
+            _row_value(row, "active", "enabled"),
+            default=True,
+        ):
+            continue
+
+        carrier_service_code = str(
+            _row_value(
+                row,
+                "carrier_service_code",
+                "royalmail_service_code",
+                "serviceCode",
+            )
+            or ""
+        ).strip().upper()
+
+        service_register_code = str(
+            _row_value(
+                row,
+                "service_register_code",
+                "serviceRegisterCode",
+            )
+            or ""
+        ).strip()
+
+        package_format_kind = _row_package_format_register_kind(row)
+
+        if (
+            not carrier_service_code
+            or not service_register_code
+            or not package_format_kind
+        ):
+            continue
+
+        index.setdefault(
+            (carrier_service_code, package_format_kind),
+            service_register_code,
+        )
+
+    return index
+def _service_register_by_raw_csv_carrier_index(
+    csv_path: pathlib.Path = SERVICES_CSV,
+    *,
+    active_only: bool = False,
+) -> dict[str, str]:
+    """
+    Build carrier-level register-code fallback from raw services.csv rows.
+
+    This fallback is only safe when the carrier serviceCode has exactly one
+    register code and no package-format-specific rows.
+    """
+    grouped: dict[str, dict[str, typing.Any]] = {}
+
+    for row in _iter_raw_service_csv_rows(csv_path):
+        if active_only and not is_active_flag(
+            _row_value(row, "active", "enabled"),
+            default=True,
+        ):
+            continue
+
+        carrier_service_code = str(
+            _row_value(
+                row,
+                "carrier_service_code",
+                "royalmail_service_code",
+                "serviceCode",
+            )
+            or ""
+        ).strip().upper()
+
+        service_register_code = str(
+            _row_value(
+                row,
+                "service_register_code",
+                "serviceRegisterCode",
+            )
+            or ""
+        ).strip()
+
+        package_format_kind = _row_package_format_register_kind(row)
+
+        if not carrier_service_code or not service_register_code:
+            continue
+
+        entry = grouped.setdefault(
+            carrier_service_code,
+            {
+                "register_codes": set(),
+                "has_package_format_kind": False,
+            },
+        )
+
+        entry["register_codes"].add(service_register_code)
+
+        if package_format_kind not in [None, ""]:
+            entry["has_package_format_kind"] = True
+
+    resolved: dict[str, str] = {}
+
+    for carrier_service_code, entry in grouped.items():
+        if entry["has_package_format_kind"]:
+            continue
+
+        register_codes = entry["register_codes"]
+
+        if len(register_codes) != 1:
+            continue
+
+        resolved[carrier_service_code] = next(iter(register_codes))
+
+    return resolved
 
 def _service_register_by_carrier_and_format_index(
     services: typing.Iterable[models.ServiceLevel],
@@ -2716,14 +2994,20 @@ def _service_register_by_carrier_and_format_index(
     """
     Index serviceRegisterCode values by carrier service code and package kind.
 
-    This must be able to use inactive CSV rows because some inactive rows are
-    intentionally retained as Click & Drop metadata rows. For example:
+    This supports both:
 
-        CRL24 + largeLetter -> 01
-        CRL24 + parcel      -> 02
+    1. Legacy scalar metadata:
+        metadata["package_format_kind"] = "large_letter"
+        metadata["service_register_code"] = "01"
 
-    The parcel rows may be inactive for Karrio rating/reference purposes but
-    are still required to serialize Click & Drop shipment requests correctly.
+    2. Merged duplicate-row metadata:
+        metadata["service_register_codes_by_package_format_kind"] = {
+            "large_letter": "01",
+            "parcel": "02",
+        }
+
+    The second form is required for product-family serviceCode values such as
+    TPN24.
     """
     index: dict[tuple[str, str], str] = {}
 
@@ -2731,19 +3015,50 @@ def _service_register_by_carrier_and_format_index(
         carrier_service_code = str(
             service.carrier_service_code or ""
         ).strip().upper()
-        metadata = service.metadata or {}
 
-        service_register_code = metadata.get("service_register_code")
-        package_format_kind = metadata.get("package_format_kind")
-
-        if not carrier_service_code or not service_register_code or not package_format_kind:
+        if carrier_service_code == "":
             continue
 
-        key = (carrier_service_code, package_format_kind)
+        metadata = service.metadata or {}
 
-        # Keep the first value. Duplicate rows such as smallParcel/mediumParcel
-        # should normally agree on the same register code.
-        index.setdefault(key, service_register_code)
+        register_codes_by_kind = metadata.get(
+            "service_register_codes_by_package_format_kind"
+        )
+
+        if isinstance(register_codes_by_kind, dict):
+            for package_format_kind, service_register_code in (
+                register_codes_by_kind.items()
+            ):
+                package_format_kind = str(package_format_kind or "").strip()
+                service_register_code = str(service_register_code or "").strip()
+
+                if (
+                    package_format_kind == ""
+                    or service_register_code == ""
+                ):
+                    continue
+
+                index.setdefault(
+                    (carrier_service_code, package_format_kind),
+                    service_register_code,
+                )
+
+        service_register_code = str(
+            metadata.get("service_register_code") or ""
+        ).strip()
+
+        package_format_kind = metadata.get("package_format_kind")
+
+        if (
+            service_register_code == ""
+            or package_format_kind in [None, ""]
+        ):
+            continue
+
+        index.setdefault(
+            (carrier_service_code, package_format_kind),
+            service_register_code,
+        )
 
     return index
 
@@ -2828,21 +3143,37 @@ def _service_register_by_carrier_index(
 
     return resolved
 
-ACTIVE_SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = (
-    _service_register_by_carrier_and_format_index(ACTIVE_DEFAULT_SERVICES)
-)
+ACTIVE_SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = {
+    **_service_register_by_carrier_and_format_index(ACTIVE_DEFAULT_SERVICES),
+    **_service_register_by_raw_csv_carrier_and_format_index(
+        SERVICES_CSV,
+        active_only=True,
+    ),
+}
 
-SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = (
-    _service_register_by_carrier_and_format_index(DEFAULT_SERVICES)
-)
+SERVICE_REGISTER_BY_CARRIER_AND_FORMAT = {
+    **_service_register_by_carrier_and_format_index(DEFAULT_SERVICES),
+    **_service_register_by_raw_csv_carrier_and_format_index(
+        SERVICES_CSV,
+        active_only=False,
+    ),
+}
 
-ACTIVE_SERVICE_REGISTER_BY_CARRIER = (
-    _service_register_by_carrier_index(ACTIVE_DEFAULT_SERVICES)
-)
+ACTIVE_SERVICE_REGISTER_BY_CARRIER = {
+    **_service_register_by_carrier_index(ACTIVE_DEFAULT_SERVICES),
+    **_service_register_by_raw_csv_carrier_index(
+        SERVICES_CSV,
+        active_only=True,
+    ),
+}
 
-SERVICE_REGISTER_BY_CARRIER = (
-    _service_register_by_carrier_index(DEFAULT_SERVICES)
-)
+SERVICE_REGISTER_BY_CARRIER = {
+    **_service_register_by_carrier_index(DEFAULT_SERVICES),
+    **_service_register_by_raw_csv_carrier_index(
+        SERVICES_CSV,
+        active_only=False,
+    ),
+}
 
 class ReferenceRecord(dict):
     """
@@ -3572,7 +3903,6 @@ def service_supports_insurance(
         return False
 
     return included >= coverage
-
 def service_supports_package_format(
     service: typing.Any,
     package_format: typing.Optional[str],
@@ -3581,20 +3911,23 @@ def service_supports_package_format(
     Return whether a local-rating/shipment service is compatible with the
     requested Royal Mail package format.
 
-    Rules:
+    Important Click & Drop rule:
 
-    1. If services.csv explicitly sets package_format_identifier, enforce that
-       exact package band, but compare using canonical Click & Drop casing.
+        Some Royal Mail serviceCode values are product families.
 
-    2. If the service carrier code is explicitly marked flexible, allow Royal
-       Mail's known Click & Drop package classes.
+        Example:
+            TPN24 + largeLetter -> serviceRegisterCode 01
+            TPN24 + parcel      -> serviceRegisterCode 02
 
-    3. Otherwise, for blank package_format_identifier rows, enforce the inferred
-       package kind. This prevents letter services accidentally accepting parcel
-       shipments just because package_format_identifier is blank.
+    Because services.csv rows are merged by Karrio service_code, the surviving
+    ServiceLevel metadata for royal_mail_tracked_24 may look like only the first
+    row, usually:
 
-    4. Unknown/custom Click & Drop package formats are passed through instead of
-       rejected locally.
+        package_format_identifier = largeLetter
+        service_register_code     = 01
+
+    Therefore flexible carrier serviceCode values must be handled before strict
+    explicit package_format_identifier validation.
     """
     if package_format in [None, ""]:
         return True
@@ -3610,10 +3943,7 @@ def service_supports_package_format(
 
     service_level = resolve_service_level(service)
 
-    if service_level is None:
-        return True
-
-    metadata = service_level.metadata or {}
+    metadata = service_level.metadata or {} if service_level is not None else {}
 
     service_format = metadata.get("package_format_identifier")
     service_kind = metadata.get("package_format_kind")
@@ -3623,13 +3953,38 @@ def service_supports_package_format(
     )
 
     carrier_service_code = str(
-        service_level.carrier_service_code
+        (
+            service_level.carrier_service_code
+            if service_level is not None
+            else None
+        )
         or resolve_carrier_service(service)
         or ""
     ).strip().upper()
 
-    # Strict exact-band validation only applies when services.csv explicitly
-    # configured package_format_identifier.
+    # ---------------------------------------------------------------------
+    # Flexible Click & Drop product-family services must be handled before
+    # strict explicit-row validation.
+    #
+    # Example:
+    #   royal_mail_tracked_24 is loaded from the first TPN24 row:
+    #       largeLetter / 01
+    #
+    # But the same carrier serviceCode also supports:
+    #       parcel / 02
+    #
+    # If we validate the first row's explicit package_format_identifier before
+    # checking flexibility, smallParcel/parcel shipments are incorrectly
+    # rejected.
+    # ---------------------------------------------------------------------
+    if carrier_service_code in CLICK_AND_DROP_FLEXIBLE_PACKAGE_FORMAT_SERVICE_CODES:
+        return resolve_service_register_code(
+            service,
+            package_format=requested_format,
+        ) not in [None, ""]
+
+    # Strict exact-band validation applies to non-flexible services when
+    # services.csv explicitly configured package_format_identifier.
     if package_format_identifier_is_explicit and service_format not in [None, ""]:
         normalized_service_format = normalize_click_and_drop_package_format_identifier(
             service_format
@@ -3651,15 +4006,9 @@ def service_supports_package_format(
 
         return False
 
-    # Some Royal Mail services intentionally use packageFormatIdentifier as the
-    # package-level discriminator. TPN24 is the key example: the same serviceCode
-    # can be used with letter, largeLetter, or parcel.
-    if carrier_service_code in CLICK_AND_DROP_FLEXIBLE_PACKAGE_FORMAT_SERVICE_CODES:
-        return requested_kind in ["letter", "large_letter", "parcel"]
-
-    # For all other blank package_format_identifier rows, enforce the inferred
-    # package kind so that letter services do not accept parcels and parcel
-    # services do not accept letters.
+    # For blank package_format_identifier rows, enforce the inferred package
+    # kind so letter services do not accept parcels and parcel services do not
+    # accept letters.
     if service_kind not in [None, ""]:
         return service_kind == requested_kind
 
@@ -3887,21 +4236,17 @@ def resolve_service_register_code(
     package_format: typing.Optional[str] = None,
 ) -> typing.Optional[str]:
     """
-    Resolve any supported selector to the Royal Mail API `serviceRegisterCode`.
+    Resolve any supported selector to the Royal Mail Click & Drop
+    `postageDetails.serviceRegisterCode`.
 
-    Important:
-    This resolver is used for Click & Drop shipment serialization, so it must be
-    broader than the active Karrio rating/reference catalogue.
+    Important Royal Mail Click & Drop behaviour:
 
-    Rules:
-    - Prefer package-format-specific carrier mappings.
-    - Use the full CSV catalogue for metadata, because inactive rows may still
-      contain required Click & Drop register data.
-    - If no package-format-specific mapping exists, fall back to a carrier-level
-      mapping only when that carrier code has exactly one unambiguous register
-      code across the catalogue.
-    - Preserve active-only service exposure elsewhere; do not use this function
-      to decide whether a service should appear in Karrio rates/references.
+        TPN24 + largeLetter -> serviceRegisterCode 01
+        TPN24 + parcel      -> serviceRegisterCode 02
+
+    Some Royal Mail serviceCode values are product families. Therefore the
+    resolver must prefer serviceCode + package-format-kind mappings and must
+    not reuse a merged large-letter register code for a parcel shipment.
     """
     if service in [None, ""]:
         return None
@@ -3934,12 +4279,17 @@ def resolve_service_register_code(
     if service_level is not None:
         append_carrier_candidate(service_level.carrier_service_code)
 
-    # First resolve by carrier serviceCode + package kind. This is the critical
-    # path for services where the register code depends on format, for example:
+    # ---------------------------------------------------------------------
+    # 1. Preferred path: carrier serviceCode + package kind.
     #
-    #   CRL24 + largeLetter -> 01
-    #   CRL24 + parcel      -> 02
-    if package_format_kind:
+    # This handles:
+    #
+    #   TPN24 + large_letter -> 01
+    #   TPN24 + parcel       -> 02
+    #
+    # after the merged metadata map has been added during CSV loading.
+    # ---------------------------------------------------------------------
+    if package_format_kind not in [None, ""]:
         for carrier_service_code in carrier_service_code_candidates:
             active_register_code = (
                 ACTIVE_SERVICE_REGISTER_BY_CARRIER_AND_FORMAT.get(
@@ -3957,10 +4307,63 @@ def resolve_service_register_code(
             if register_code not in [None, ""]:
                 return register_code
 
-    # If the package-format-specific lookup did not find a value, fall back to
-    # carrier-level metadata only when it is unambiguous. This fixes DDP/DTP
-    # services such as MPR where the CSV row has serviceRegisterCode=01 but no
-    # package_format_identifier/package kind.
+    # ---------------------------------------------------------------------
+    # 2. Direct merged ServiceLevel metadata map fallback.
+    # ---------------------------------------------------------------------
+    if service_level is not None and package_format_kind not in [None, ""]:
+        metadata = service_level.metadata or {}
+
+        register_codes_by_kind = metadata.get(
+            "service_register_codes_by_package_format_kind"
+        )
+
+        if isinstance(register_codes_by_kind, dict):
+            register_code = register_codes_by_kind.get(package_format_kind)
+
+            if register_code not in [None, ""]:
+                return str(register_code).strip()
+
+    # ---------------------------------------------------------------------
+    # 3. Strict scalar metadata fallback.
+    #
+    # This is safe only when the scalar package kind matches the shipment
+    # package kind.
+    # ---------------------------------------------------------------------
+    metadata_register_code = None
+    metadata_package_kind = None
+
+    if service_level is not None:
+        metadata = service_level.metadata or {}
+        metadata_register_code = metadata.get("service_register_code")
+        metadata_package_kind = metadata.get("package_format_kind")
+
+        if metadata_register_code not in [None, ""]:
+            if package_format_kind is None:
+                return metadata_register_code
+
+            if metadata_package_kind == package_format_kind:
+                return metadata_register_code
+
+    # ---------------------------------------------------------------------
+    # 4. Product-family services must not fall back to a mismatched scalar
+    # register code.
+    #
+    # This prevents:
+    #
+    #   TPN24 + parcel -> incorrectly returning 01
+    # ---------------------------------------------------------------------
+    if any(
+        carrier_service_code in CLICK_AND_DROP_FLEXIBLE_PACKAGE_FORMAT_SERVICE_CODES
+        for carrier_service_code in carrier_service_code_candidates
+    ):
+        return None
+
+    # ---------------------------------------------------------------------
+    # 5. Carrier-level fallback for non-flexible services only.
+    #
+    # This is safe for carrier serviceCode values with one unambiguous register
+    # code and no package-format-specific distinction.
+    # ---------------------------------------------------------------------
     for carrier_service_code in carrier_service_code_candidates:
         active_register_code = ACTIVE_SERVICE_REGISTER_BY_CARRIER.get(
             carrier_service_code
@@ -3974,43 +4377,7 @@ def resolve_service_register_code(
         if register_code not in [None, ""]:
             return register_code
 
-    if service_level is None:
-        return None
-
-    metadata = service_level.metadata or {}
-    service_register_code = metadata.get("service_register_code")
-
-    if service_register_code in [None, ""]:
-        return None
-
-    service_kind = metadata.get("package_format_kind")
-
-    carrier_service_code = str(
-        service_level.carrier_service_code
-        or next(iter(carrier_service_code_candidates), "")
-        or ""
-    ).strip().upper()
-
-    # No package kind supplied: the service-level register code is the best
-    # available value.
-    if package_format_kind is None:
-        return service_register_code
-
-    # TPN24-style flexible services use the service-level register code while
-    # packageFormatIdentifier carries the letter/largeLetter/parcel distinction.
-    if carrier_service_code in CLICK_AND_DROP_FLEXIBLE_PACKAGE_FORMAT_SERVICE_CODES:
-        return service_register_code
-
-    # Non-flexible services must not silently reuse a letter register code for a
-    # parcel shipment, or vice versa.
-    if service_kind in [None, ""]:
-        return None
-
-    if service_kind != package_format_kind:
-        return None
-
-    return service_register_code
-
+    return None
 
 def resolve_service_name(
     service: typing.Optional[str],
@@ -4296,10 +4663,21 @@ def service_supports_email_notification(service: typing.Any) -> bool:
 
     return False
 
-
 def build_dimensions(package, dimension_type, raw_package=None):
-    """Build Karrio Dimension objects from CSV package limits."""
+    """
+    Build Royal Mail Click & Drop dimensions.
+
+    Royal Mail API rule:
+    - The `dimensions` object is optional.
+    - If included, `heightInMms`, `widthInMms`, and `depthInMms`
+      must all be present and non-zero.
+    """
     raw_dimension_unit = _source_value(raw_package, "dimension_unit", "dimensionUnit")
+
+    raw_dimension_supplied = any(
+        _source_value(raw_package, key) not in [None, ""]
+        for key in ["height", "width", "length"]
+    )
 
     height_in_mms = (
         dimension_to_mms(_source_value(raw_package, "height"), raw_dimension_unit)
@@ -4324,15 +4702,31 @@ def build_dimensions(package, dimension_type, raw_package=None):
     if depth_in_mms is None and package is not None:
         depth_in_mms = dimension_in_mms(getattr(package, "length", None))
 
-    if not all(value is not None for value in [height_in_mms, width_in_mms, depth_in_mms]):
+    values = [height_in_mms, width_in_mms, depth_in_mms]
+
+    # If the original caller did not supply dimensions and Karrio normalized
+    # missing values to zero-like dimension objects, omit dimensions entirely.
+    if not raw_dimension_supplied and all(value in [None, 0] for value in values):
         return None
+
+    # If no dimensions are available, omit the optional dimensions object.
+    if all(value is None for value in values):
+        return None
+
+    # If any dimension is missing or zero, fail locally instead of sending a
+    # Click & Drop payload that violates DimensionsRequest.
+    if any(value in [None, 0] for value in values):
+        raise ValueError(
+            "Royal Mail Click & Drop `dimensions` must include non-zero "
+            "`heightInMms`, `widthInMms`, and `depthInMms` when dimensions "
+            "are supplied."
+        )
 
     return dimension_type(
         heightInMms=height_in_mms,
         widthInMms=width_in_mms,
         depthInMms=depth_in_mms,
     )
-
 
 def resolve_package_format(
     package=None,
@@ -4810,6 +5204,12 @@ class ConnectionConfig(lib.Enum):
         default=20.0,
     )
 
+    apply_large_packaging_charge_to_rates = lib.OptionEnum(
+        "apply_large_packaging_charge_to_rates",
+        bool,
+        default=False,
+    )
+
 
 
 def connection_config_initializer(options: dict) -> lib.units.ShippingOptions:
@@ -4927,6 +5327,16 @@ class ShippingOption(lib.Enum):
         bool,
     )
 
+    custom_package_format_identifier = lib.OptionEnum(
+        "customPackageFormatIdentifier",
+        str,
+    )
+
+    guaranteed_saturday_delivery = lib.OptionEnum(
+        "guaranteedSaturdayDelivery",
+        bool,
+    )
+
     # Royal Mail identity / age-check services.
     royalmail_age_verification = lib.OptionEnum(
         "royalmail_age_verification",
@@ -5037,6 +5447,10 @@ _OPTION_ALIASES = {
     "recipient_instructions": "recipient_instructions",
     "specialInstructions": "special_instructions",
     "special_instructions": "special_instructions",
+    "guaranteedSaturdayDelivery": "guaranteed_saturday_delivery",
+    "guaranteed_saturday_delivery": "guaranteed_saturday_delivery",
+    "saturdayDelivery": "guaranteed_saturday_delivery",
+    "saturday_delivery": "guaranteed_saturday_delivery",
 
     # Notifications
     "sendNotificationsTo": "send_notifications_to",
@@ -5082,6 +5496,8 @@ _OPTION_ALIASES = {
     "invoiceDate": "invoice_date",
     "invoice_date": "invoice_date",
     "recipientEoriNumber": "recipient_eori_number",
+    "customPackageFormatIdentifier": "custom_package_format_identifier",
+    "custom_package_format_identifier": "custom_package_format_identifier",
 
     # Recipient address
     "addressBookReference": "address_book_reference",
@@ -5154,12 +5570,15 @@ _BOOLEAN_OPTION_KEYS = {
     "dtp",
     "dap",
     "ddu",
+    "guaranteed_saturday_delivery",
+    
 }
 
 _CONFIG_BOOLEAN_KEYS = {
     "include_label_in_response",
     "include_return_label_in_response",
     "apply_uk_vat_to_rates",
+    "apply_large_packaging_charge_to_rates",
 }
 
 
@@ -5184,6 +5603,7 @@ def _normalize_option_keys(options: dict) -> dict:
 
 PACKAGE_LEVEL_OPTION_KEYS = {
     "package_format_identifier",
+    "custom_package_format_identifier",
 }
 
 KNOWN_SHIPPING_OPTION_KEYS = {

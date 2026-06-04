@@ -52,7 +52,6 @@ def _payload_value(payload, *names):
 
     return None
 
-
 def label_request(payload, settings: provider_utils.Settings) -> lib.Serializable:
     """Build a Click & Drop label retrieval request."""
     reference = (
@@ -60,11 +59,14 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
         if isinstance(payload, (str, int, list, tuple, set))
         else provider_utils.get_value(payload, "reference")
     )
+
     order_identifiers = (
         payload
         if isinstance(payload, (str, int, list, tuple, set))
         else provider_utils.get_value(payload, "order_identifiers")
         or provider_utils.get_value(payload, "orderIdentifiers")
+        or provider_utils.get_value(payload, "order_identifier")
+        or provider_utils.get_value(payload, "orderIdentifier")
         or provider_utils.get_value(payload, "shipment_identifier")
         or provider_utils.get_value(payload, "shipmentIdentifier")
         or reference
@@ -81,7 +83,8 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
     if not resolved_order_identifiers:
         raise ValueError(
             "Royal Mail Click & Drop label requests require "
-            "`order_identifiers`, `orderIdentifiers`, `shipment_identifier`, "
+            "`order_identifiers`, `orderIdentifiers`, `order_identifier`, "
+            "`orderIdentifier`, `shipment_identifier`, "
             "`shipmentIdentifier`, or `reference`"
         )
 
@@ -133,7 +136,6 @@ def label_request(payload, settings: provider_utils.Settings) -> lib.Serializabl
     }
 
     return lib.Serializable(request, lambda data: data)
-
 
 def parse_label_response(
     _response: lib.Deserializable[typing.Any],
