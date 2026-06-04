@@ -160,6 +160,7 @@ Raw Royal Mail carrier codes such as `CRL24`, `CRL48`, `OTA`, and `TSS` may be a
     - `hs_code` / `customs_code` -> `customsCode`
     - `origin_country` / `origin_country_code` -> `originCountryCode`
     - `customs.content_type` -> `customsDeclarationCategory`
+    
 - Royal Mail customs declaration categories are normalized to:
     - `none`
     - `gift`
@@ -218,39 +219,6 @@ description: Forbidden (Feature not available)
 
 That /full endpoint is not available for normal Click & Drop / OBA accounts. It is ChannelShipper-only customers
 
-## Parcelforce International chargeable weight
-
-The Click & Drop API schema caps `ShipmentPackageRequest.weightInGrams` at `30000`.
-
-This does not mean Parcelforce International rating must reject all parcels whose chargeable rating weight exceeds `30kg`.
-
-For rating, Parcelforce International uses a chargeable weight concept. Chargeable weight should be the greatest of:
-
-1. Declared/pre-advised weight.
-2. Actual/measured weight when supplied.
-3. Volumetric weight.
-
-The default volumetric divisor is:
-
-```text
-5000 cm³/kg
-```
-
-Therefore:
-
-```text
-volumetric_weight_kg = length_cm * width_cm * height_cm / 5000
-```
-
-The connector should use this chargeable weight for:
-
-- selecting the local static rate band;
-- opening the synthetic `>30kg` Parcelforce rating band;
-- calculating the destination-specific “Surcharge per Additional kg after 30KG”.
-
-The connector should **not** use chargeable/volumetric weight as the Click & Drop `weightInGrams` value. Click & Drop order creation should continue to send the declared/pre-advised physical package weight from the Karrio parcel.
-
-
 ## Royal Mail surcharge and VAT implementation
 
 Royal Mail surcharges are implemented as data-driven service-level surcharges on top of Karrio's universal rating engine.
@@ -268,6 +236,55 @@ Implemented surcharge types:
 | Signature on delivery     | Option-triggered via `signature_confirmation` / `request_signature_upon_delivery` |
 | Age verification          | Option-triggered via `royalmail_age_verification` / `age_verification`            |
 | ID verification           | Option-triggered via `royalmail_id_verification` / `id_verification`              |
+| **Oversized**             | Option-triggered via `math` > 30KG cost + (surcharge * totalweight - 30)          |
+
+
+For a Parcelforce/globalpriority row where the surcharge is £10 per kg over 30kg:
+
+```csv
+10.00,30,,ceil
+```
+
+Example meaning:
+
+```text
+oversized_surcharge_amount_per_kg = 10.00
+oversized_surcharge_threshold_kg  = 30
+oversized_surcharge_max_weight_kg = blank
+oversized_surcharge_rounding      = ceil
+```
+
+If Parcelforce gives you a hard maximum, set it:
+
+```csv
+10.00,30,50,ceil
+```
+
+That would allow rating above 30kg up to 50kg.
+
+**Oversized** does **not** add the oversized surcharge directly in `_service_surcharges(row)`.
+
+Reason: `_service_surcharges(row)` creates static `ServiceLevel.surcharges`, but this Parcelforce charge depends on the parcel weight. Adding it statically would charge every parcel even when it is under 30kg.
+
+Instead, the flow becomes:
+
+services.csv metadata
+        ↓
+proxy receives RateRequest
+        ↓
+proxy checks each parcel weight
+        ↓
+if weight > threshold:
+    excess kg = weight - threshold
+    surcharge = excess kg * amount_per_kg
+        ↓
+inject fixed Karrio surcharge for that parcel
+        ↓
+universal rating returns:
+    Base Charge
+    Parcelforce Oversized Surcharge
+    other active surcharges
+
 
 Peak surcharge dates can come from service metadata:
 

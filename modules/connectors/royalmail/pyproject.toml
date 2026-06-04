@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "LGPL-3.0"
 authors = [
-    {name = "ralsim", email = "richard.simcox@motorsport-tools.com"}
+    {name = "karrio", email = "hello@karrio.io"}
 ]
 classifiers = [
     "Intended Audience :: Developers",
@@ -38,3 +38,10 @@ include-package-data = true
 [tool.setuptools.packages.find]
 exclude = ["tests.*", "tests"]
 namespaces = true
+
+[tool.setuptools.package-data]
+"karrio.providers.royalmail" = [
+    "services.csv",
+    "parcelforce-international-services.csv",
+    "royalmail-international-services.csv",
+]
