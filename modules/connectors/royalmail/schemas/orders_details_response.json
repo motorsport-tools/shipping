@@ -87,7 +87,7 @@
           "quantity": 2,
           "unitValue": 12.5,
           "lineTotal": 25.0,
-          "customsCode": "610910"
+          "customsCode": "HS610910"
         }
       ],
       "tags": [
@@ -184,7 +184,7 @@
           "quantity": 1,
           "unitValue": 45.0,
           "lineTotal": 45.0,
-          "customsCode": "870830"
+          "customsCode": "HS610910"
         }
       ],
       "tags": [

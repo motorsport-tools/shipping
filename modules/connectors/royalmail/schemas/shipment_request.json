@@ -67,7 +67,8 @@
               "licenseNumber": "",
               "certificateNumber": ""
             }
-          ]
+          ],
+          "customPackageFormatIdentifier": "CUSTOM_BOX_A"
         }
       ],
       "orderDate": "2024-01-01T10:00:00Z",
@@ -96,7 +97,8 @@
         "requiresExportLicense": false,
         "commercialInvoiceNumber": "INV-1001",
         "commercialInvoiceDate": "2024-01-01T10:00:00Z",
-        "recipientEoriNumber": ""
+        "recipientEoriNumber": "",
+        "guaranteedSaturdayDelivery": false
       },
       "tags": [
         {
