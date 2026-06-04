@@ -91,3 +91,12 @@ class TestRoyalMailClickandDropGetOrder(unittest.TestCase):
             )
 
 
+    def test_get_order_request_accepts_singular_order_identifier(self):
+        request = fixture.gateway.mapper.create_get_order_request({
+            "order_identifier": 12345678,
+        })
+
+        self.assertEqual(
+            request.serialize(),
+            {"orderIdentifiers": "12345678"},
+        )

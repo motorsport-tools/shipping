@@ -287,3 +287,25 @@ class TestRoyalMailClickandDropSettings(unittest.TestCase):
                 "royal_mail_international_tracked_small_parcel"
             )
         )
+
+    def test_connection_config_large_packaging_charge_flag_normalizes_string_boolean(self):
+        """Normalize the Large Packaging Charge config flag from string values."""
+        gateway = self._gateway(
+            config={
+                "apply_large_packaging_charge_to_rates": "true",
+            }
+        )
+
+        self.assertTrue(
+            gateway.settings.connection_config.apply_large_packaging_charge_to_rates.state
+        )
+
+        gateway = self._gateway(
+            config={
+                "apply_large_packaging_charge_to_rates": "false",
+            }
+        )
+
+        self.assertFalse(
+            gateway.settings.connection_config.apply_large_packaging_charge_to_rates.state
+        )

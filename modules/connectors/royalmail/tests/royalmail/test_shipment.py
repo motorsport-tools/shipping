@@ -1051,13 +1051,18 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
         self.assertEqual(postage["serviceRegisterCode"], "02")
         self.assertEqual(package["packageFormatIdentifier"], "parcel")
 
-
-    def test_create_shipment_request_tpn24_large_letter_keeps_large_letter_format(self):
+    def test_create_shipment_request_tpn24_large_letter_uses_large_letter_register_code(self):
         """
-        TPN24 is package-format flexible in Click & Drop.
+        TPN24 is a Royal Mail Click & Drop product family.
 
-        A large-letter package should be serialized as largeLetter, not rejected and
-        not collapsed to parcel.
+        The same serviceCode can represent multiple Royal Mail products, and the
+        package format determines the serviceRegisterCode:
+
+            TPN24 + largeLetter -> serviceRegisterCode 01 / 214655TN
+            TPN24 + parcel      -> serviceRegisterCode 02 / 904405TN
+
+        Therefore a large-letter shipment must keep packageFormatIdentifier as
+        largeLetter and must use serviceRegisterCode 01.
         """
         payload = copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
 
@@ -1085,7 +1090,7 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
         package = serialized["items"][0]["packages"][0]
 
         self.assertEqual(postage["serviceCode"], "TPN24")
-        self.assertEqual(postage["serviceRegisterCode"], "02")
+        self.assertEqual(postage["serviceRegisterCode"], "01")
         self.assertEqual(package["packageFormatIdentifier"], "largeLetter")
 
     def test_click_and_drop_package_format_resolver_maps_parcelforce_medium_parcel_to_parcel(self):
@@ -1278,3 +1283,233 @@ class TestRoyalMailClickandDropShipment(unittest.TestCase):
             "only includes compensation cover",
         ):
             self._serialized_request(payload)
+
+    def test_create_shipment_request_tpn24_register_code_follows_package_format(self):
+        """
+        TPN24 uses serviceRegisterCode 01 for large letters and 02 for parcels.
+        """
+        cases = [
+            {
+                "package_format_identifier": None,
+                "packaging_type": "largeLetter",
+                "weight": 100,
+                "length": 30,
+                "width": 20,
+                "height": 2,
+                "expected_package_format": "largeLetter",
+                "expected_register_code": "01",
+            },
+            {
+                "package_format_identifier": "small_parcel",
+                "packaging_type": "smallParcel",
+                "weight": 1000,
+                "length": 30,
+                "width": 20,
+                "height": 10,
+                "expected_package_format": "parcel",
+                "expected_register_code": "02",
+            },
+        ]
+
+        for case in cases:
+            with self.subTest(case=case):
+                payload = copy.deepcopy(fixture.ShipmentPayloadWithoutBilling)
+
+                payload["service"] = "royal_mail_tracked_24"
+                payload["options"]["carrier_name"] = "Royal Mail OBA"
+
+                if case["package_format_identifier"] is None:
+                    payload["options"].pop("package_format_identifier", None)
+                else:
+                    payload["options"]["package_format_identifier"] = case[
+                        "package_format_identifier"
+                    ]
+
+                payload["parcels"][0].update(
+                    {
+                        "weight": case["weight"],
+                        "weight_unit": "G",
+                        "length": case["length"],
+                        "width": case["width"],
+                        "height": case["height"],
+                        "dimension_unit": "CM",
+                        "packaging_type": case["packaging_type"],
+                    }
+                )
+
+                self._set_single_light_item(payload, item_weight=10, item_value=1.0)
+
+                serialized = self._serialized_request(payload)
+
+                postage = serialized["items"][0]["postageDetails"]
+                package = serialized["items"][0]["packages"][0]
+
+                self.assertEqual(postage["serviceCode"], "TPN24")
+                self.assertEqual(
+                    postage["serviceRegisterCode"],
+                    case["expected_register_code"],
+                )
+                self.assertEqual(
+                    package["packageFormatIdentifier"],
+                    case["expected_package_format"],
+                )
+
+    def test_shipment_rejects_zero_dimensions(self):
+        payload = copy.deepcopy(fixture.ShipmentPayload)
+        payload["parcels"][0]["height"] = 0
+
+        with self.assertRaisesRegex(ValueError, "dimensions.*non-zero"):
+            fixture.gateway.mapper.create_shipment_request(
+                models.ShipmentRequest(**payload)
+            )
+    def test_gb_to_gb_residential_recipient_sets_is_recipient_a_business_false(self):
+        payload = copy.deepcopy(fixture.ShipmentPayload)
+
+        payload["shipper"]["country_code"] = "GB"
+        payload["shipper"]["postal_code"] = "LL536NH"
+        payload["shipper"]["residential"] = False
+
+        payload["recipient"]["country_code"] = "GB"
+        payload["recipient"]["postal_code"] = "LL615SJ"
+        payload["recipient"]["residential"] = True
+
+        request = fixture.gateway.mapper.create_shipment_request(
+            models.ShipmentRequest(**payload)
+        )
+
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertEqual(
+            serialized["items"][0]["isRecipientABusiness"],
+            False,
+        )
+
+    def test_gb_to_gb_business_recipient_sets_is_recipient_a_business_true(self):
+        payload = copy.deepcopy(fixture.ShipmentPayload)
+
+        payload["shipper"]["country_code"] = "GB"
+        payload["shipper"]["postal_code"] = "LL536NH"
+        payload["shipper"]["residential"] = False
+
+        payload["recipient"]["country_code"] = "GB"
+        payload["recipient"]["postal_code"] = "LL615SJ"
+        payload["recipient"]["residential"] = False
+
+        request = fixture.gateway.mapper.create_shipment_request(
+            models.ShipmentRequest(**payload)
+        )
+
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertEqual(
+            serialized["items"][0]["isRecipientABusiness"],
+            True,
+        )
+
+    def test_gb_to_international_residential_recipient_sets_is_recipient_a_business_false(self):
+        payload = copy.deepcopy(fixture.ShipmentPayloadInternational)
+
+        payload["shipper"]["country_code"] = "GB"
+        payload["shipper"]["postal_code"] = "LL536NH"
+        payload["shipper"]["residential"] = False
+
+        payload["recipient"]["country_code"] = "FR"
+        payload["recipient"]["postal_code"] = "75001"
+        payload["recipient"]["residential"] = True
+
+        request = fixture.gateway.mapper.create_shipment_request(
+            models.ShipmentRequest(**payload)
+        )
+
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertEqual(
+            serialized["items"][0]["isRecipientABusiness"],
+            False,
+        )
+
+    def test_gb_to_international_business_recipient_sets_is_recipient_a_business_true(self):
+        payload = copy.deepcopy(fixture.ShipmentPayloadInternational)
+
+        payload["shipper"]["country_code"] = "GB"
+        payload["shipper"]["postal_code"] = "LL536NH"
+        payload["shipper"]["residential"] = False
+
+        payload["recipient"]["country_code"] = "FR"
+        payload["recipient"]["postal_code"] = "75001"
+        payload["recipient"]["residential"] = False
+
+        request = fixture.gateway.mapper.create_shipment_request(
+            models.ShipmentRequest(**payload)
+        )
+
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertEqual(
+            serialized["items"][0]["isRecipientABusiness"],
+            True,
+        )
+
+    def test_gb_to_ni_residential_recipient_sets_is_recipient_a_business_false(self):
+        payload = copy.deepcopy(fixture.ShipmentPayload)
+
+        payload["shipper"]["country_code"] = "GB"
+        payload["shipper"]["postal_code"] = "LL536NH"
+        payload["shipper"]["residential"] = False
+
+        payload["recipient"]["country_code"] = "GB"
+        payload["recipient"]["postal_code"] = "BT1 1AA"
+        payload["recipient"]["residential"] = True
+
+        request = fixture.gateway.mapper.create_shipment_request(
+            models.ShipmentRequest(**payload)
+        )
+
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertEqual(
+            serialized["items"][0]["isRecipientABusiness"],
+            False,
+        )
+
+    def test_gb_to_ni_business_recipient_sets_is_recipient_a_business_true(self):
+        payload = copy.deepcopy(fixture.ShipmentPayload)
+
+        payload["shipper"]["country_code"] = "GB"
+        payload["shipper"]["postal_code"] = "LL536NH"
+        payload["shipper"]["residential"] = False
+
+        payload["recipient"]["country_code"] = "GB"
+        payload["recipient"]["postal_code"] = "BT1 1AA"
+        payload["recipient"]["residential"] = False
+
+        request = fixture.gateway.mapper.create_shipment_request(
+            models.ShipmentRequest(**payload)
+        )
+
+        serialized = lib.to_dict(request.serialize())
+
+        self.assertEqual(
+            serialized["items"][0]["isRecipientABusiness"],
+            True,
+        )
+
+    def test_gb_to_ni_requires_recipient_residential_flag_when_unknown(self):
+        payload = copy.deepcopy(fixture.ShipmentPayload)
+
+        payload["shipper"]["country_code"] = "GB"
+        payload["shipper"]["postal_code"] = "LL536NH"
+        payload["shipper"]["residential"] = False
+
+        payload["recipient"]["country_code"] = "GB"
+        payload["recipient"]["postal_code"] = "BT1 1AA"
+
+        # Do not pop the key. Karrio's Address model defaults missing
+        # residential to False, so popping it will still normalize to business.
+        # Use None to explicitly simulate an unknown residential/business state.
+        payload["recipient"]["residential"] = None
+
+        with self.assertRaisesRegex(ValueError, "recipient.residential"):
+            fixture.gateway.mapper.create_shipment_request(
+                models.ShipmentRequest(**payload)
+            )

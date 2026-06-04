@@ -160,3 +160,20 @@ class TestRoyalMailClickandDropLabel(unittest.TestCase):
             self.assertEqual(parsed[1][0].code, "NotFound")
 
 
+    def test_label_request_accepts_singular_order_identifier(self):
+        request = fixture.gateway.mapper.create_label_request({
+            "order_identifier": 12345678,
+            "document_type": "postageLabel",
+        })
+
+        self.assertEqual(
+            request.serialize(),
+            {
+                "orderIdentifiers": "12345678",
+                "query": {
+                    "documentType": "postageLabel",
+                    "includeReturnsLabel": False,
+                    "includeCN": None,
+                },
+            },
+        )

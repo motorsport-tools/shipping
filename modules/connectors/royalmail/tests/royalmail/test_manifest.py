@@ -95,4 +95,8 @@ class TestRoyalMailClickandDropManifest(unittest.TestCase):
             self.assertGreater(len(parsed[1]), 0)
 
 
-
+    def test_manifest_identifier_must_be_numeric(self):
+        with self.assertRaisesRegex(ValueError, "manifestIdentifier` must be numeric"):
+            fixture.gateway.mapper.create_get_manifest_request({
+                "manifest_identifier": "MANIFEST-123",
+            })

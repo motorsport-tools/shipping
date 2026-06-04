@@ -654,6 +654,7 @@ ShipmentPayloadRichBase = {
         "company_name": "Test Warehouse",
         "phone_number": "07111111111",
         "email": "warehouse@example.com",
+        "residential": False,
     },
     "recipient": {
         "address_line1": "1 High Street",
@@ -665,6 +666,7 @@ ShipmentPayloadRichBase = {
         "company_name": "Example Ltd",
         "phone_number": "07123456789",
         "email": "john@example.com",
+        "residential": False,
     },
     "parcels": [
         {
@@ -1092,6 +1094,7 @@ ShipmentRequest = {
     "items": [
         {
             "orderReference": "ORDER-1001",
+            "isRecipientABusiness": True,
             "recipient": {
                 "address": {
                     "fullName": "John Smith",
@@ -2161,7 +2164,7 @@ GetOrderDetailsResponse = [
                 "quantity": 2,
                 "unitValue": 12.5,
                 "lineTotal": 25.0,
-                "customsCode": 610910,
+                "customsCode": "610910",
             }
         ],
         "tags": [{"key": "channel", "value": "web"}],
@@ -2492,7 +2495,7 @@ ListOrderDetailsResponse = {
                     "quantity": 2,
                     "unitValue": 12.5,
                     "lineTotal": 25.0,
-                    "customsCode": 610910,
+                    "customsCode": "610910",
                 }
             ],
             "tags": [{"key": "channel", "value": "web"}],

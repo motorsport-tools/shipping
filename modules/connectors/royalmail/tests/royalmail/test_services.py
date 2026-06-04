@@ -17,6 +17,8 @@ import karrio.references as references
 from . import fixture
 
 
+
+
 class TestRoyalMailClickandDropServices(unittest.TestCase):
     def setUp(self):
         self.maxDiff = None
@@ -24,6 +26,23 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
     # -------------------------------------------------------------------------
     # CSV helpers
     # -------------------------------------------------------------------------
+
+    def _service_uses_parcelforce_sidecar_zones(
+        self,
+        service_code,
+        carrier_service_code=None,
+    ):
+        service = self._services_by_code()[service_code]
+
+        if carrier_service_code not in [None, ""]:
+            prefix = f"parcelforce_{str(carrier_service_code).strip().lower()}_"
+        else:
+            prefix = "parcelforce_"
+
+        return any(
+            str(getattr(zone, "id", "") or "").startswith(prefix)
+            for zone in service.zones or []
+        )
 
     def _services_csv_path(self):
         return pathlib.Path(
@@ -223,7 +242,38 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         return cm
 
     def _package_format_kind_from_csv_row(self, row):
-        """Infer the Royal Mail register package kind from CSV limits."""
+        """Infer the Royal Mail register package kind from CSV limits.
+
+        Prefer the explicit package_format_identifier column when present.
+        Dimension inference is only a fallback for older/minimal CSV rows.
+        """
+        explicit_package_format = self._row_value(
+            row,
+            "package_format_identifier",
+        )
+
+        if explicit_package_format not in [None, ""]:
+            key = re.sub(
+                r"[^a-z0-9]+",
+                "",
+                str(explicit_package_format).strip().lower(),
+            )
+
+            if key == "letter":
+                return "letter"
+
+            if key == "largeletter":
+                return "large_letter"
+
+            if key in [
+                "parcel",
+                "smallparcel",
+                "mediumparcel",
+                "largeparcel",
+                "custom",
+            ]:
+                return "parcel"
+
         raw_weight_unit = row.get("weight_unit") or "G"
         raw_dimension_unit = row.get("dimension_unit") or "MM"
 
@@ -1078,7 +1128,27 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertEqual(zones["World Zone 3"].country_codes, ["US"])
 
     def test_royal_mail_europe_only_services_expand_to_europe_zones_only(self):
-        """intl_europe services should not cover World Zone destinations."""
+        """
+        intl_europe services should not cover World Zone destinations.
+
+        This grouped-zone assertion only applies when Parcelforce sidecar
+        loading is disabled for ECA / parcel_force_europe.
+
+        When the sidecar is enabled, parcel_force_europe is expanded into
+        destination-specific zones from parcelforce-international-services.csv,
+        for example France, Germany, Netherlands, Switzerland, etc. In that
+        mode the service should not expose Europe Zone 1/2/3 labels.
+        """
+        if self._service_uses_parcelforce_sidecar_zones(
+            "parcel_force_europe",
+            "ECA",
+        ):
+            self.skipTest(
+                "parcel_force_europe is using Parcelforce sidecar zones; "
+                "grouped intl_europe zone assertions only apply when sidecar "
+                "loading is disabled."
+            )
+
         zones = self._zones_by_label("parcel_force_europe")
 
         self.assertEqual(
@@ -1095,7 +1165,25 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
         self.assertIn("CH", zones["Europe Zone 3"].country_codes)
 
     def test_royal_mail_row_services_expand_to_world_zones_only(self):
-        """intl_row services should cover World Zones only, not Europe Zones."""
+        """
+        intl_row services should cover World Zones only, not Europe Zones.
+
+        This grouped-zone assertion only applies when Parcelforce sidecar
+        loading is disabled for GPA / parcel_force_globalpriority_row.
+
+        When the sidecar is enabled, parcel_force_globalpriority_row is expanded
+        into destination-specific zones from parcelforce-international-services.csv.
+        """
+        if self._service_uses_parcelforce_sidecar_zones(
+            "parcel_force_globalpriority_row",
+            "GPA",
+        ):
+            self.skipTest(
+                "parcel_force_globalpriority_row is using Parcelforce sidecar "
+                "zones; grouped intl_row zone assertions only apply when "
+                "sidecar loading is disabled."
+            )
+
         zones = self._zones_by_label("parcel_force_globalpriority_row")
 
         self.assertEqual(
@@ -1115,64 +1203,72 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
 
         self.assertEqual(zones["World Zone 3"].country_codes, ["US"])
 
-    def test_tpn24_blank_package_format_identifier_is_flexible(self):
-        """
-        TPN24 intentionally has a blank package_format_identifier in services.csv.
+        self.assertEqual(zones["World Zone 3"].country_codes, ["US"])
 
-        That blank value must not be inferred into a strict smallParcel-only
-        package band. TPN24 can be used with letter, largeLetter, or parcel package
-        formats in Click & Drop.
+    def test_tpn24_register_code_depends_on_package_format(self):
+        """
+        TPN24 uses the same Royal Mail Click & Drop serviceCode for more than one
+        product variant.
+
+            TPN24 + largeLetter -> 01 / 214655TN
+            TPN24 + parcel      -> 02 / 904405TN
         """
         service = provider_units.resolve_service_level("royal_mail_tracked_24")
 
-        self.assertIsNotNone(service)
+        assert service is not None
+        assert service.carrier_service_code == "TPN24"
 
-        metadata = service.metadata or {}
-
-        self.assertIsNone(metadata.get("package_format_identifier"))
-        self.assertFalse(metadata.get("package_format_identifier_is_explicit"))
-        self.assertEqual(
-            metadata.get("inferred_package_format_identifier"),
-            "smallParcel",
-        )
-
-        for package_format in [
-            "letter",
+        assert provider_units.service_supports_package_format(
+            "royal_mail_tracked_24",
             "largeLetter",
-            "smallParcel",
-            "mediumParcel",
-            "parcel",
-        ]:
-            with self.subTest(package_format=package_format):
-                self.assertTrue(
-                    provider_units.service_supports_package_format(
-                        "royal_mail_tracked_24",
-                        package_format,
-                    )
-                )
-
-        self.assertEqual(
-            provider_units.resolve_service_register_code(
-                "royal_mail_tracked_24",
-                package_format="letter",
-            ),
-            "02",
         )
-        self.assertEqual(
+
+        assert provider_units.service_supports_package_format(
+            "royal_mail_tracked_24",
+            "smallParcel",
+        )
+
+        assert provider_units.service_supports_package_format(
+            "royal_mail_tracked_24",
+            "mediumParcel",
+        )
+
+        assert provider_units.service_supports_package_format(
+            "royal_mail_tracked_24",
+            "parcel",
+        )
+
+        assert (
             provider_units.resolve_service_register_code(
                 "royal_mail_tracked_24",
                 package_format="largeLetter",
-            ),
-            "02",
+            )
+            == "01"
         )
-        self.assertEqual(
+
+        assert (
+            provider_units.resolve_service_register_code(
+                "royal_mail_tracked_24",
+                package_format="smallParcel",
+            )
+            == "02"
+        )
+
+        assert (
             provider_units.resolve_service_register_code(
                 "royal_mail_tracked_24",
                 package_format="mediumParcel",
-            ),
-            "02",
+            )
+            == "02"
         )
 
+        assert (
+            provider_units.resolve_service_register_code(
+                "royal_mail_tracked_24",
+                package_format="parcel",
+            )
+            == "02"
+        )
 
     def test_blank_package_format_identifier_does_not_make_all_services_flexible(self):
         """
@@ -1209,3 +1305,121 @@ class TestRoyalMailClickandDropServices(unittest.TestCase):
                 package_format="smallParcel",
             )
         )
+
+    def test_parcelforce_europe_sidecar_expands_to_destination_zones_when_enabled(self):
+        """
+        ECA / parcel_force_europe should expand to destination-specific zones
+        when Parcelforce sidecar loading is enabled.
+        """
+        if not self._service_uses_parcelforce_sidecar_zones(
+            "parcel_force_europe",
+            "ECA",
+        ):
+            self.skipTest(
+                "parcel_force_europe is using grouped intl_europe zones; "
+                "sidecar-zone assertion only applies when sidecar loading is enabled."
+            )
+
+        zones = self._zones_by_label("parcel_force_europe")
+
+        self.assertNotIn("Europe Zone 1", zones)
+        self.assertNotIn("Europe Zone 2", zones)
+        self.assertNotIn("Europe Zone 3", zones)
+        self.assertNotIn("World Zone 1", zones)
+        self.assertNotIn("World Zone 2", zones)
+        self.assertNotIn("World Zone 3", zones)
+
+        country_codes = {
+            country_code
+            for zone in zones.values()
+            for country_code in zone.country_codes or []
+        }
+
+        self.assertIn("FR", country_codes)
+        self.assertIn("DE", country_codes)
+        self.assertIn("NL", country_codes)
+        self.assertIn("CH", country_codes)
+
+        # Sanity check: Europe service should not include common ROW examples.
+        self.assertNotIn("US", country_codes)
+        self.assertNotIn("AU", country_codes)
+        self.assertNotIn("NZ", country_codes)
+
+    def test_parcelforce_globalpriority_sidecar_expands_to_destination_zones_when_enabled(self):
+        """
+        GPA / parcel_force_globalpriority_row should expand to destination-specific
+        zones when Parcelforce sidecar loading is enabled.
+        """
+        if not self._service_uses_parcelforce_sidecar_zones(
+            "parcel_force_globalpriority_row",
+            "GPA",
+        ):
+            self.skipTest(
+                "parcel_force_globalpriority_row is using grouped intl_row zones; "
+                "sidecar-zone assertion only applies when sidecar loading is enabled."
+            )
+
+        zones = self._zones_by_label("parcel_force_globalpriority_row")
+
+        self.assertNotIn("Europe Zone 1", zones)
+        self.assertNotIn("Europe Zone 2", zones)
+        self.assertNotIn("Europe Zone 3", zones)
+        self.assertNotIn("World Zone 1", zones)
+        self.assertNotIn("World Zone 2", zones)
+        self.assertNotIn("World Zone 3", zones)
+
+        country_codes = {
+            country_code
+            for zone in zones.values()
+            for country_code in zone.country_codes or []
+        }
+
+        self.assertIn("US", country_codes)
+        self.assertIn("AU", country_codes)
+        self.assertIn("NZ", country_codes)
+
+    def test_royal_mail_register_codes_follow_c1_c2_package_split(self):
+        """
+        Royal Mail Click & Drop uses serviceRegisterCode to distinguish large-letter
+        and parcel variants under the same serviceCode family.
+
+        Examples:
+            CRL24 + largeLetter -> 01
+            CRL24 + parcel      -> 02
+
+            CRL48 + largeLetter -> 01
+            CRL48 + parcel      -> 02
+
+            TPN24 + largeLetter -> 01
+            TPN24 + parcel      -> 02
+        """
+        cases = [
+            ("CRL24", "largeLetter", "01"),
+            ("CRL24", "smallParcel", "02"),
+            ("CRL24", "mediumParcel", "02"),
+            ("CRL24", "parcel", "02"),
+
+            ("CRL48", "largeLetter", "01"),
+            ("CRL48", "smallParcel", "02"),
+            ("CRL48", "mediumParcel", "02"),
+            ("CRL48", "parcel", "02"),
+
+            ("TPN24", "largeLetter", "01"),
+            ("TPN24", "smallParcel", "02"),
+            ("TPN24", "mediumParcel", "02"),
+            ("TPN24", "parcel", "02"),
+        ]
+
+        for carrier_service_code, package_format, expected_register_code in cases:
+            with self.subTest(
+                carrier_service_code=carrier_service_code,
+                package_format=package_format,
+                expected_register_code=expected_register_code,
+            ):
+                self.assertEqual(
+                    provider_units.resolve_service_register_code(
+                        carrier_service_code,
+                        package_format=package_format,
+                    ),
+                    expected_register_code,
+                )

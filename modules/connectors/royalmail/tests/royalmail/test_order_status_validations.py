@@ -82,3 +82,25 @@ class TestRoyalMailClickandDropOrderStatusValidations(unittest.TestCase):
                     ]
                 }
             )
+
+    def test_order_status_request_accepts_order_status_alias(self):
+        request = fixture.gateway.mapper.create_order_status_request({
+            "items": [
+                {
+                    "order_identifier": 12345678,
+                    "order_status": "despatched",
+                }
+            ]
+        })
+
+        self.assertEqual(
+            request.serialize(),
+            {
+                "items": [
+                    {
+                        "orderIdentifier": 12345678,
+                        "status": "despatched",
+                    }
+                ]
+            },
+        )

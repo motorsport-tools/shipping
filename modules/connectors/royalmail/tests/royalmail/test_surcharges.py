@@ -658,3 +658,313 @@ class TestRoyalMailClickAndDropSurcharges(unittest.TestCase):
             rate["total_charge"],
             expected_total,
         )
+
+    def test_parcelforce_chargeable_weight_uses_volumetric_weight(self):
+        parcel = {
+            "weight": 8000,
+            "weight_unit": "G",
+            "length": 40,
+            "width": 30,
+            "height": 50,
+            "dimension_unit": "CM",
+        }
+
+        self.assertEqual(
+            royalmail_proxy._parcel_chargeable_weight_kg(parcel),
+            12.0,
+        )
+
+    def test_parcelforce_oversized_surcharge_uses_volumetric_weight_over_30kg(self):
+        service = provider_units.SERVICE_LEVEL_BY_CODE["parcel_force_express_24"]
+
+        service = attr.evolve(
+            service,
+            max_weight=30.0,
+            metadata={
+                **(service.metadata or {}),
+                "oversized_surcharge_amount_per_kg": 10.00,
+                "oversized_surcharge_threshold_kg": 30.0,
+                "oversized_surcharge_rounding": "ceil",
+            },
+            surcharges=[],
+        )
+
+        # Declared/pre-advised Click & Drop weight is only 8kg and is therefore
+        # valid for the API's 30000g package limit.
+        #
+        # Rating weight is different:
+        #   100cm * 50cm * 40cm / 5000 = 40kg volumetric
+        #
+        # Additional kg after 30kg:
+        #   40kg - 30kg = 10kg
+        #   10kg * £10 = £100
+        rated_service = royalmail_proxy._with_active_royalmail_surcharges(
+            service,
+            surcharge_date=None,
+            options={},
+            parcel={
+                "weight": 8000,
+                "weight_unit": "G",
+                "length": 100,
+                "width": 50,
+                "height": 40,
+                "dimension_unit": "CM",
+            },
+        )
+
+        surcharges = lib.to_dict(rated_service.surcharges)
+
+        self.assertIn(
+            {
+                "id": "royalmail_parcelforce_oversized",
+                "name": "Parcelforce Oversized Surcharge",
+                "amount": 100.0,
+                "surcharge_type": "fixed",
+                "active": True,
+            },
+            surcharges,
+        )
+
+        self.assertEqual(rated_service.max_weight, 40.0)
+
+    def test_rate_normalization_defaults_to_declared_weight(self):
+        parcel = {
+            "weight": 8000,
+            "weight_unit": "G",
+            "length": 40,
+            "width": 30,
+            "height": 50,
+            "dimension_unit": "CM",
+        }
+
+        normalized = royalmail_proxy._normalize_rate_parcel_for_universal_rating(parcel)
+
+        # Normal Royal Mail rating pass uses declared/pre-advised weight.
+        self.assertEqual(normalized["weight"], 8.0)
+        self.assertEqual(normalized["weight_unit"], "KG")
+
+        # Original parcel is not mutated.
+        self.assertEqual(parcel["weight"], 8000)
+        self.assertEqual(parcel["weight_unit"], "G")
+
+
+    def test_rate_normalization_can_use_chargeable_weight_for_parcelforce_pass(self):
+        parcel = {
+            "weight": 8000,
+            "weight_unit": "G",
+            "length": 40,
+            "width": 30,
+            "height": 50,
+            "dimension_unit": "CM",
+        }
+
+        normalized = royalmail_proxy._normalize_rate_parcel_for_universal_rating(
+            parcel,
+            use_chargeable_weight=True,
+        )
+
+        # Parcelforce chargeable-weight pass uses volumetric/chargeable weight.
+        self.assertEqual(normalized["weight"], 12.0)
+        self.assertEqual(normalized["weight_unit"], "KG")
+
+        # Original parcel is not mutated. Shipment creation can still send
+        # weightInGrams = 8000 to Click & Drop.
+        self.assertEqual(parcel["weight"], 8000)
+        self.assertEqual(parcel["weight_unit"], "G")
+
+    def _settings_with_large_packaging_charge(self, service, enabled=True):
+        return attr.evolve(
+            fixture.gateway.settings,
+            services=[service],
+            config={
+                **(fixture.gateway.settings.config or {}),
+                "apply_large_packaging_charge_to_rates": enabled,
+            },
+        )
+
+    def _large_packaging_rate_payload(self, service_code, parcel_values):
+        payload = copy.deepcopy(fixture.RatePayload)
+        payload["services"] = [service_code]
+        payload["parcels"] = []
+
+        for index, value in enumerate(parcel_values, start=1):
+            parcel = copy.deepcopy(fixture.RatePayload["parcels"][0])
+            parcel["items"] = [
+                {
+                    "description": f"Rated item {index}",
+                    "sku": f"LPC-{index}",
+                    "quantity": 1,
+                    "value_amount": value,
+                    "weight": 0.1,
+                    "weight_unit": "KG",
+                }
+            ]
+            payload["parcels"].append(parcel)
+
+        return payload
+
+    def test_large_packaging_charge_tiers_are_based_on_order_items_total(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+
+        service = attr.evolve(
+            service,
+            surcharges=[],
+            metadata={
+                **(service.metadata or {}),
+                "vat_applicable": False,
+            },
+        )
+
+        settings = self._settings_with_large_packaging_charge(
+            service,
+            enabled=True,
+        )
+
+        cases = [
+            # Exact thresholds are not charged at the higher tier because the
+            # rule is "order value over £X".
+            (500.00, None),
+            (500.01, 5.00),
+            (1000.00, 5.00),
+            (1000.01, 10.00),
+            (2000.00, 10.00),
+            (2000.01, 15.00),
+            (3000.00, 15.00),
+            (3000.01, 20.00),
+        ]
+
+        for order_value, expected_amount in cases:
+            with self.subTest(order_value=order_value):
+                payload = self._large_packaging_rate_payload(
+                    service.service_code,
+                    [order_value],
+                )
+
+                surcharge = royalmail_proxy._royalmail_large_packaging_charge_surcharge(
+                    settings,
+                    models.RateRequest(**payload),
+                )
+
+                actual_amount = (
+                    None
+                    if surcharge is None
+                    else surcharge.amount
+                )
+
+                self.assertEqual(actual_amount, expected_amount)
+
+    def test_large_packaging_charge_is_disabled_by_default(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+
+        service = attr.evolve(
+            service,
+            surcharges=[],
+            metadata={
+                **(service.metadata or {}),
+                "vat_applicable": False,
+            },
+        )
+
+        settings = self._settings_with_large_packaging_charge(
+            service,
+            enabled=False,
+        )
+
+        payload = self._large_packaging_rate_payload(
+            service.service_code,
+            [3000.01],
+        )
+
+        surcharge = royalmail_proxy._royalmail_large_packaging_charge_surcharge(
+            settings,
+            models.RateRequest(**payload),
+        )
+
+        self.assertIsNone(surcharge)
+
+    def test_rate_applies_large_packaging_charge_once_per_parcel_when_enabled(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+
+        service = attr.evolve(
+            service,
+            surcharges=[],
+            metadata={
+                **(service.metadata or {}),
+                "vat_applicable": False,
+            },
+        )
+
+        settings = self._settings_with_large_packaging_charge(
+            service,
+            enabled=True,
+        )
+
+        # Full order item value = £1001, so the £10-per-parcel tier applies.
+        payload = self._large_packaging_rate_payload(
+            service.service_code,
+            [600.00, 401.00],
+        )
+
+        response = royalmail_proxy.Proxy(settings=settings).get_rates(
+            lib.Serializable(
+                models.RateRequest(**payload)
+            )
+        ).deserialize()
+
+        self.assertEqual(len(response), 2)
+
+        for _, package_response in response:
+            rates, messages = package_response
+            rates = lib.to_dict(rates)
+            messages = lib.to_dict(messages)
+
+            self.assertEqual(messages, [])
+            self.assertEqual(len(rates), 1)
+
+            rate = rates[0]
+            charges = _charge_amounts(rate)
+
+            self.assertEqual(
+                charges["Large Packaging Charge"],
+                10.00,
+            )
+
+            self.assertEqual(
+                rate["total_charge"],
+                _money(
+                    charges["Base Charge"]
+                    + charges["Large Packaging Charge"]
+                ),
+            )
+
+    def test_large_packaging_charge_uses_quantity_times_item_value(self):
+        service = self._active_service(self.SURCHARGE_RATE_SERVICE_CODE)
+
+        service = attr.evolve(
+            service,
+            surcharges=[],
+            metadata={
+                **(service.metadata or {}),
+                "vat_applicable": False,
+            },
+        )
+
+        settings = self._settings_with_large_packaging_charge(
+            service,
+            enabled=True,
+        )
+
+        payload = self._large_packaging_rate_payload(
+            service.service_code,
+            [250.01],
+        )
+        payload["parcels"][0]["items"][0]["quantity"] = 2
+
+        surcharge = royalmail_proxy._royalmail_large_packaging_charge_surcharge(
+            settings,
+            models.RateRequest(**payload),
+        )
+
+        # 250.01 * 2 = 500.02, so the first tier applies.
+        self.assertIsNotNone(surcharge)
+        self.assertEqual(surcharge.amount, 5.00)
